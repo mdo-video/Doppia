@@ -8,20 +8,25 @@ import java.util.Locale
 class Prop(
     val code: Int,
     val type: Int,
-    val canSet: Boolean,
-    val enabled: Boolean,
+    val getSet: Int,
+    val enabledFlag: Int,
     val current: Long,
     val options: List<Long>
 ) {
-    val settable: Boolean get() = canSet && enabled
+    /** Regola della guida Sony: bit 0x80 = controllo sempre azionabile, altrimenti conta "IsEnabled" = 1. */
+    val settable: Boolean get() = (getSet and 0x80) != 0 || enabledFlag == 1
 }
 
 object SonyProps {
     const val SHUTTER = 0xD20D      // uint32: alto = numeratore, basso = denominatore
     const val APERTURE = 0x5007     // uint16: f-number x 100
     const val ISO = 0xD21E          // uint32: 0x00FFFFFF = AUTO, byte alto = flag riduzione rumore
-    const val REC_STATE = 0xD21D    // stato registrazione (da verificare sul log)
+    const val REC_STATE = 0xD21D    // stato registrazione filmato: 0 = fermo
     const val REC_BUTTON = 0xD2C8   // pulsante REC: 2 = giu', 1 = su
+    const val EXP_COMP = 0x5010     // int16: EV x 1000
+    const val WB = 0x5005
+    const val EXP_MODE = 0x500E     // 1 M, 2 P, 3 A, 4 S
+    const val METERING = 0x500B
 
     fun typeSize(t: Int): Int = when (t) {
         1, 2 -> 1; 3, 4 -> 2; 5, 6 -> 4; 7, 8 -> 8; 9, 10 -> 16; else -> -1
@@ -51,6 +56,13 @@ object SonyProps {
         return best
     }
 
+    /** Una sola riga (risposta di 0x9203). */
+    fun parseOne(d: ByteArray): Prop? {
+        if (d.size < 8) return null
+        val bb = ByteBuffer.wrap(d).order(ByteOrder.LITTLE_ENDIAN)
+        return entry(d, bb, 0)?.first
+    }
+
     private fun parseWith(d: ByteArray, head: Int): Parsed {
         val out = LinkedHashMap<Int, Prop>()
         if (d.size < head) return Parsed(out, false)
@@ -59,29 +71,68 @@ object SonyProps {
         if (n < 0 || n > 5000) return Parsed(out, false)
         var p = head
         for (k in 0 until n.toInt()) {
-            if (p + 6 > d.size) return Parsed(out, false)
-            val pc = bb.getShort(p).toInt() and 0xffff
-            val dt = bb.getShort(p + 2).toInt() and 0xffff
-            val getSet = d[p + 4].toInt() and 0xff
-            val enabled = d[p + 5].toInt() and 0xff
+            val e = entry(d, bb, p) ?: return Parsed(out, false)
+            out[e.first.code] = e.first
+            p = e.second
+        }
+        return Parsed(out, p == d.size)
+    }
+
+    /** Legge una riga della tabella; gestisce numeri, stringhe e array. Ritorna null se non riesce a proseguire. */
+    private fun entry(d: ByteArray, bb: ByteBuffer, start: Int): Pair<Prop, Int>? {
+        var p = start
+        if (p + 6 > d.size) return null
+        val pc = bb.getShort(p).toInt() and 0xffff
+        val dt = bb.getShort(p + 2).toInt() and 0xffff
+        val getSet = d[p + 4].toInt() and 0xff
+        val enabled = d[p + 5].toInt() and 0xff
+        p += 6
+
+        val isStr = dt == 0xFFFF
+        val isArr = dt in 0x4001..0x400A
+        var cur = 0L
+        var setList: List<Long> = emptyList()
+        var getList: List<Long> = emptyList()
+
+        if (isStr) {
+            for (k in 0 until 2) {
+                if (p + 1 > d.size) return null
+                val cnt = d[p].toInt() and 0xff
+                p += 1 + 2 * cnt
+                if (p > d.size) return null
+            }
+            if (p + 1 > d.size) return null
+            if ((d[p].toInt() and 0xff) != 0) return null
+            p += 1
+        } else if (isArr) {
+            val esz = typeSize(dt - 0x4000)
+            if (esz < 0) return null
+            for (k in 0 until 2) {
+                if (p + 4 > d.size) return null
+                val cnt = bb.getInt(p)
+                if (cnt < 0 || cnt > 100000) return null
+                p += 4 + cnt * esz
+                if (p > d.size) return null
+            }
+            if (p + 1 > d.size) return null
+            if ((d[p].toInt() and 0xff) != 0) return null
+            p += 1
+        } else {
             val sz = typeSize(dt)
-            if (sz < 0) return Parsed(out, false) // stringhe o array: non so proseguire
-            p += 6
-            if (p + 2 * sz + 1 > d.size) return Parsed(out, false)
-            val cur = readVal(bb, p + sz, dt)
+            if (sz < 0) return null
+            if (p + 2 * sz + 1 > d.size) return null
+            cur = readVal(bb, p + sz, dt)
             p += 2 * sz
             val form = d[p].toInt() and 0xff
             p += 1
-            var setList: List<Long> = emptyList()
-            var getList: List<Long> = emptyList()
             when (form) {
                 1 -> p += 3 * sz
                 2 -> {
                     for (l in 0 until 2) {
-                        if (p + 2 > d.size) return Parsed(out, false)
+                        if (p + 2 > d.size) return null
                         val cnt = bb.getShort(p).toInt() and 0xffff
                         p += 2
-                        if (p + cnt * sz > d.size) return Parsed(out, false)
+                        if (p + cnt * sz > d.size) return null
                         val list = ArrayList<Long>(cnt)
                         for (j in 0 until cnt) list.add(readVal(bb, p + j * sz, dt))
                         p += cnt * sz
@@ -89,10 +140,9 @@ object SonyProps {
                     }
                 }
             }
-            if (p > d.size) return Parsed(out, false)
-            out[pc] = Prop(pc, dt, getSet == 1, enabled == 1, cur, if (setList.isNotEmpty()) setList else getList)
+            if (p > d.size) return null
         }
-        return Parsed(out, p == d.size)
+        return Pair(Prop(pc, dt, getSet, enabled, cur, if (setList.isNotEmpty()) setList else getList), p)
     }
 
     fun toBytes(v: Long, size: Int): ByteArray {
@@ -103,6 +153,7 @@ object SonyProps {
 
     fun fmtShutter(v: Long): String {
         if (v == 0L) return "BULB"
+        if (v == 0xFFFFFFFFL) return "—"
         val n = ((v shr 16) and 0xffff).toInt()
         val dn = (v and 0xffff).toInt()
         if (n == 0 || dn == 0) return "—"
@@ -116,7 +167,7 @@ object SonyProps {
     }
 
     fun fmtAperture(v: Long): String {
-        if (v <= 0L || v == 0xffffL) return "—"
+        if (v <= 0L || v >= 0xFFFDL) return "—"
         return if (v >= 1000) "F${v / 100}" else String.format(Locale.ROOT, "F%.1f", v / 100.0)
     }
 
@@ -127,10 +178,28 @@ object SonyProps {
         return if (nr) "$base NR" else "$base"
     }
 
+    fun fmtEv(v: Long): String {
+        val ev = v / 1000.0
+        return if (Math.abs(ev) < 0.05) "0.0" else String.format(Locale.ROOT, "%+.1f", ev)
+    }
+
+    private fun hex(v: Long) = "0x" + java.lang.Long.toHexString(v).uppercase(Locale.ROOT)
+
     fun fmt(code: Int, v: Long): String = when (code) {
         SHUTTER -> fmtShutter(v)
         APERTURE -> fmtAperture(v)
         ISO -> fmtIso(v)
-        else -> v.toString()
+        EXP_COMP -> fmtEv(v)
+        EXP_MODE -> when (v) { 1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> hex(v) }
+        METERING -> when (v) {
+            0x8001L -> "Multi"; 0x8002L -> "Centro"; 0x8003L -> "Media schermo"
+            0x8004L -> "Spot standard"; 0x8005L -> "Spot largo"; 0x8006L -> "Alte luci"
+            else -> hex(v)
+        }
+        WB -> when (v) {
+            2L -> "Auto"; 4L -> "Luce diurna"; 5L -> "Fluorescente"; 6L -> "Incandescenza"; 7L -> "Flash"
+            else -> hex(v)
+        }
+        else -> hex(v)
     }
 }

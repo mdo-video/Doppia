@@ -38,17 +38,63 @@ class SonyCam(
         }
     }
 
-    /** Preme e rilascia il pulsante REC (SDIO_ControlDevice 0x9207, proprieta' 0xD2C8). */
+    companion object {
+        /** Metodo REC che ha funzionato, per indirizzo (ricordato finche' l'app e' aperta). */
+        val learnedRecipe = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    }
+
+    /** Ultima tabella proprieta' letta (per l'interfaccia). */
+    val props: Map<Int, Prop> get() = lastMap
+
+    private fun recipeSteps(i: Int, start: Boolean): List<Pair<Int, Int>> = when (i) {
+        0 -> listOf(SonyProps.REC_BUTTON to (if (start) 2 else 1))
+        1 -> listOf(SonyProps.REC_BUTTON to 2, SonyProps.REC_BUTTON to 1)
+        2 -> listOf(0xD2FE to 2, 0xD2FE to 1)
+        else -> listOf(0xF001 to 2, 0xF001 to 1)
+    }
+
+    /**
+     * Avvia o ferma la registrazione. Prova i metodi uno alla volta (pulsante premi/rilascia, valore diretto,
+     * due codici "toggle" delle camere piu' nuove) e dopo ciascuno controlla se lo stato REC e' cambiato davvero.
+     */
     fun toggleRec() {
         cmds.add { c ->
+            val before = lastMap[SonyProps.REC_STATE]?.current
+            val start = (before ?: 0L) == 0L
+            val order = ArrayList<Int>()
+            learnedRecipe[host]?.let { order.add(it) }
+            for (i in intArrayOf(1, 0, 2, 3)) if (i !in order) order.add(i)
             diffBase = lastMap
-            diffLeft = 4
-            val d = c.transaction(0x9207, intArrayOf(SonyProps.REC_BUTTON), SonyProps.toBytes(2, 2))
-            say("REC giu': ${hex(d.code)}")
-            Thread.sleep(120)
-            val u = c.transaction(0x9207, intArrayOf(SonyProps.REC_BUTTON), SonyProps.toBytes(1, 2))
-            say("REC su: ${hex(u.code)}")
-            pollNow = true
+            diffLeft = 8
+            say("REC: richiedo ${if (start) "avvio" else "stop"} (stato attuale: ${before ?: "sconosciuto"})")
+            for (idx in order) {
+                for ((code, v) in recipeSteps(idx, start)) {
+                    val r = c.transaction(0x9207, intArrayOf(code), SonyProps.toBytes(v.toLong(), 2))
+                    say("REC metodo ${idx + 1}: ${hex(code)} <- $v: ${hex(r.code)}")
+                    Thread.sleep(150)
+                }
+                if (before == null) { // senza stato non posso verificare: mi fermo al primo metodo
+                    pollNow = true
+                    return@add
+                }
+                var waited = 0
+                var changed = false
+                while (waited < 2500 && running) {
+                    Thread.sleep(250)
+                    waited += 250
+                    val tr = c.transaction(0x9209, intArrayOf(0, 0))
+                    if (tr.ok) handleProps(tr.data, c)
+                    if (lastMap[SonyProps.REC_STATE]?.current != before) { changed = true; break }
+                }
+                if (changed) {
+                    learnedRecipe[host] = idx
+                    say("REC: fatto, metodo ${idx + 1}")
+                    pollNow = true
+                    return@add
+                }
+                say("REC: nessun cambio con il metodo ${idx + 1}")
+            }
+            say("REC: nessun metodo ha cambiato lo stato. La camera e' in modalita' filmato? Guarda la riga 'Cambiate dopo REC'")
         }
     }
 
@@ -192,7 +238,7 @@ class SonyCam(
                     pollNow = false
                     val t = c.transaction(0x9209, intArrayOf(0, 0))
                     lastPoll = System.nanoTime()
-                    if (t.ok) handleProps(t.data)
+                    if (t.ok) handleProps(t.data, c)
                 }
             }
         } catch (e: InterruptedException) {
@@ -211,9 +257,26 @@ class SonyCam(
 
     private var propsLogged = false
 
-    private fun handleProps(data: ByteArray) {
+    private var apFail = 0
+    private var apLogged = false
+
+    /** Se il diaframma non e' nella tabella completa, lo chiede da solo con 0x9203 (descrittore di una proprieta'). */
+    private fun withAperture(t: Map<Int, Prop>, c: PtpIpClient): Map<Int, Prop> {
+        if (t.isEmpty() || t.containsKey(SonyProps.APERTURE) || apFail >= 3) return t
+        val a = c.transaction(0x9203, intArrayOf(SonyProps.APERTURE))
+        val pr = if (a.ok) SonyProps.parseOne(a.data) else null
+        if (!apLogged) {
+            apLogged = true
+            say("Diaframma non nella tabella: provo 0x9203 -> ${hex(a.code)}, ${a.data.size} byte, " +
+                if (pr != null) "valore ${SonyProps.fmt(SonyProps.APERTURE, pr.current)}" else "non leggibile (obiettivo manuale?)")
+        }
+        if (pr == null) { apFail++; return t }
+        return t + (SonyProps.APERTURE to pr)
+    }
+
+    private fun handleProps(data: ByteArray, c: PtpIpClient) {
         val r = SonyProps.parse(data)
-        val m = r.props
+        val m = withAperture(r.props, c)
         if (m.isEmpty()) return
         if (!propsLogged) {
             propsLogged = true

@@ -1,16 +1,19 @@
 package com.mdovideo.doppia
 
+import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.drawable.GradientDrawable
-import android.os.SystemClock
-import android.widget.HorizontalScrollView
+import android.graphics.Path
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableString
@@ -19,14 +22,17 @@ import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import com.google.android.material.button.MaterialButton
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,7 +43,7 @@ class RecButton(ctx: Context) : View(ctx) {
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.WHITE
-        strokeWidth = ctx.dp(3).toFloat()
+        strokeWidth = ctx.dp(2).toFloat()
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE53935.toInt() }
     var recording = false
@@ -54,22 +60,119 @@ class RecButton(ctx: Context) : View(ctx) {
             val h = r * 0.5f
             c.drawRoundRect(cx - h, cy - h, cx + h, cy + h, h * 0.25f, h * 0.25f, fill)
         } else {
-            c.drawCircle(cx, cy, r * 0.72f, fill)
+            c.drawCircle(cx, cy, r * 0.68f, fill)
         }
     }
 }
 
-/** Un riquadro con il live di una camera: immagine, nome, ritardo, REC e comandi esposizione stile monitor Sony. */
+/** Istogramma della luminanza (64 barre). */
+class HistView(ctx: Context) : View(ctx) {
+    var bins: IntArray? = null
+        set(v) { field = v; invalidate() }
+    private val barP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCCE8EDF3.toInt() }
+    private val bgP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x990B0F15.toInt() }
+
+    override fun onDraw(c: Canvas) {
+        val b = bins ?: return
+        val r = dp(8).toFloat()
+        c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), r, r, bgP)
+        var mx = 1
+        for (v in b) if (v > mx) mx = v
+        val pad = dp(5).toFloat()
+        val bw = (width - 2 * pad) / b.size
+        val hh = height - 2 * pad
+        for (i in b.indices) {
+            val f = Math.sqrt(b[i].toDouble() / mx).toFloat()
+            val x = pad + i * bw
+            c.drawRect(x, pad + hh * (1f - f), x + bw * 0.85f, pad + hh, barP)
+        }
+    }
+}
+
+/** Esposimetro come il "M.M." Sony: scala da -3 a +3 EV con indicatore (stimato dall'immagine). */
+class MeterView(ctx: Context) : View(ctx) {
+    var ev = 0f
+        set(v) { field = v; invalidate() }
+    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Pal.MUTED; strokeWidth = ctx.dp(1).toFloat() }
+    private val zero = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeWidth = ctx.dp(2).toFloat() }
+    private val mark = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Pal.TEXT
+        textSize = ctx.dp(12).toFloat()
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Pal.MUTED
+        textSize = ctx.dp(9).toFloat()
+        textAlign = Paint.Align.CENTER
+    }
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val pad = dp(14).toFloat()
+        val x0 = pad
+        val x1 = w - pad
+        val yl = h * 0.60f
+        for (k in -9..9) {
+            val x = x0 + (k + 9) / 18f * (x1 - x0)
+            val big = k % 3 == 0
+            val th = dp(if (big) 8 else 4).toFloat()
+            c.drawLine(x, yl - th, x, yl, if (k == 0) zero else tick)
+        }
+        c.drawText("-3", x0, yl + dp(11), label)
+        c.drawText("0", (x0 + x1) / 2f, yl + dp(11), label)
+        c.drawText("+3", x1, yl + dp(11), label)
+        val e = ev.coerceIn(-3f, 3f)
+        val xm = x0 + (e + 3f) / 6f * (x1 - x0)
+        mark.color = if (Math.abs(ev) > 2f) 0xFFE53935.toInt() else Pal.MID
+        val p = Path()
+        p.moveTo(xm, yl + dp(1))
+        p.lineTo(xm - dp(5), yl - dp(9))
+        p.lineTo(xm + dp(5), yl - dp(9))
+        p.close()
+        c.drawPath(p, mark)
+        c.drawText(String.format(Locale.ROOT, "%+.1f EV", ev), w / 2f, dp(11).toFloat(), txt)
+    }
+}
+
+/** Griglia dei terzi, allineata all'immagine (non al riquadro). */
+class GridView(ctx: Context) : View(ctx) {
+    var aspect = 16f / 9f
+    private val p = Paint().apply { color = 0x99FFFFFF.toInt(); strokeWidth = ctx.dp(1).toFloat() }
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        var iw = w
+        var ih = w / aspect
+        if (ih > h) { ih = h; iw = h * aspect }
+        val l = (w - iw) / 2f
+        val t = (h - ih) / 2f
+        for (k in 1..2) {
+            c.drawLine(l + iw * k / 3f, t, l + iw * k / 3f, t + ih, p)
+            c.drawLine(l, t + ih * k / 3f, l + iw, t + ih * k / 3f, p)
+        }
+    }
+}
+
+/** Un riquadro con il live di una camera, in stile monitor Sony: REC, otturatore / diaframma / ISO, esposimetro, istogramma. */
 class Tile(ctx: Context, private val label: String, private val accent: Int) : FrameLayout(ctx) {
     private val img = ImageView(ctx)
+    private val zebraImg = ImageView(ctx)
+    private val peakImg = ImageView(ctx)
+    private val gridV = GridView(ctx)
     private val tag = TextView(ctx)
     private val lag = TextView(ctx)
     private val empty = TextView(ctx)
 
-    // Monitor Sony
     private val recPill = TextView(ctx)
     private val recBtn = RecButton(ctx)
     private val bar = LinearLayout(ctx)
+    private val meterBox = LinearLayout(ctx)
+    private val meterV = MeterView(ctx)
+    private val histV = HistView(ctx)
     private val picker = HorizontalScrollView(ctx)
     private val pickerRow = LinearLayout(ctx)
     private val chipBox = HashMap<Int, LinearLayout>()
@@ -79,9 +182,10 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private var props: Map<Int, Prop> = emptyMap()
     private var pickerCode = 0
     private var recStart = 0L
+    private var evSmooth = 0f
     private val borderRed = GradientDrawable().apply {
         setColor(0)
-        setStroke(ctx.dp(3), 0xFFE53935.toInt())
+        setStroke(ctx.dp(4), 0xFFE53935.toInt())
         cornerRadius = ctx.dp(22).toFloat()
     }
 
@@ -101,17 +205,36 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
+    private fun full() = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+
+    private fun divider(): View {
+        val v = View(context)
+        v.setBackgroundColor(Pal.LINE)
+        val lp = LinearLayout.LayoutParams(dp(1), dp(30))
+        lp.setMargins(dp(6), 0, dp(6), 0)
+        v.layoutParams = lp
+        return v
+    }
+
     init {
         background = roundBg(Pal.SURFACE, 22, ctx)
         clipToOutline = true
         img.scaleType = ImageView.ScaleType.FIT_CENTER
-        addView(img, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(img, full())
+        zebraImg.scaleType = ImageView.ScaleType.FIT_CENTER
+        zebraImg.visibility = View.GONE
+        addView(zebraImg, full())
+        peakImg.scaleType = ImageView.ScaleType.FIT_CENTER
+        peakImg.visibility = View.GONE
+        addView(peakImg, full())
+        gridV.visibility = View.GONE
+        addView(gridV, full())
 
         empty.setTextColor(Pal.MUTED)
         empty.textSize = 15f
         empty.gravity = Gravity.CENTER
         empty.text = "Nessun segnale"
-        addView(empty, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(empty, full())
 
         tag.setTextColor(Pal.TEXT)
         tag.textSize = 13f
@@ -137,41 +260,45 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
         // Pillola REC con il tempo, in alto al centro
         recPill.setTextColor(Color.WHITE)
-        recPill.textSize = 13f
-        recPill.typeface = Typeface.MONOSPACE
-        recPill.setPadding(dp(12), dp(5), dp(12), dp(5))
-        recPill.background = roundBg(0xE6C62828.toInt(), 14, ctx)
+        recPill.textSize = 14f
+        recPill.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        recPill.setPadding(dp(14), dp(6), dp(14), dp(6))
+        recPill.background = roundBg(0xE6C62828.toInt(), 16, ctx)
         recPill.visibility = View.GONE
         val rp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         rp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         rp.topMargin = dp(12)
         addView(recPill, rp)
 
-        // Pulsante REC a destra
-        recBtn.visibility = View.GONE
-        recBtn.setOnClickListener {
-            recBtn.pending = true
-            postDelayed({ recBtn.pending = false }, 3000)
-            onRec?.invoke()
-        }
-        val bp = LayoutParams(dp(64), dp(64))
-        bp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        bp.rightMargin = dp(14)
-        addView(recBtn, bp)
+        // Istogramma in basso a sinistra
+        histV.visibility = View.GONE
+        val hp = LayoutParams(dp(120), dp(60))
+        hp.gravity = Gravity.BOTTOM or Gravity.START
+        hp.setMargins(dp(12), 0, 0, dp(12))
+        addView(histV, hp)
 
-        // Barra esposizione in basso: otturatore, diaframma, ISO
+        // Barra monitor in basso: REC | otturatore diaframma ISO | esposimetro
         bar.orientation = LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
-        bar.background = roundBg(0xCC0B0F15.toInt(), 16, ctx)
-        bar.setPadding(dp(6), dp(4), dp(6), dp(4))
+        bar.background = roundBg(0xD90B0F15.toInt(), 18, ctx)
+        bar.setPadding(dp(8), dp(5), dp(8), dp(5))
         bar.visibility = View.GONE
+
+        recBtn.setOnClickListener {
+            recBtn.pending = true
+            postDelayed({ recBtn.pending = false }, 7000)
+            onRec?.invoke()
+        }
+        bar.addView(recBtn, LinearLayout.LayoutParams(dp(46), dp(46)))
+        bar.addView(divider())
+
         val titles = arrayOf("SHUTTER", "IRIS", "ISO")
         for (k in chipCodes.indices) {
             val code = chipCodes[k]
             val box = LinearLayout(ctx)
             box.orientation = LinearLayout.VERTICAL
             box.gravity = Gravity.CENTER
-            box.setPadding(dp(14), dp(4), dp(14), dp(4))
+            box.setPadding(dp(12), dp(3), dp(12), dp(3))
             val t = TextView(ctx)
             t.text = titles[k]
             t.textSize = 9f
@@ -179,9 +306,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             t.gravity = Gravity.CENTER
             val v = TextView(ctx)
             v.text = "—"
-            v.textSize = 18f
+            v.textSize = 19f
             v.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            v.setTextColor(Pal.TEXT)
+            v.setTextColor(Pal.MUTED)
             v.gravity = Gravity.CENTER
             box.addView(t)
             box.addView(v)
@@ -190,6 +317,14 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             chipBox[code] = box
             chipVal[code] = v
         }
+
+        meterBox.orientation = LinearLayout.HORIZONTAL
+        meterBox.gravity = Gravity.CENTER_VERTICAL
+        meterBox.visibility = View.GONE
+        meterBox.addView(divider())
+        meterBox.addView(meterV, LinearLayout.LayoutParams(dp(150), dp(38)))
+        bar.addView(meterBox)
+
         val barLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         barLp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         barLp.bottomMargin = dp(12)
@@ -204,17 +339,39 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         picker.visibility = View.GONE
         val pkLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         pkLp.gravity = Gravity.BOTTOM
-        pkLp.setMargins(dp(12), 0, dp(12), dp(84))
+        pkLp.setMargins(dp(12), 0, dp(12), dp(88))
         addView(picker, pkLp)
     }
 
-    fun setFrame(b: Bitmap, ms: Int) {
+    fun setFrame(b: Bitmap, ms: Int, a: Analysis?) {
         img.setImageBitmap(b)
         empty.visibility = View.GONE
         lag.visibility = View.VISIBLE
         val s = SpannableString("● $ms ms")
         s.setSpan(ForegroundColorSpan(lagColor(ms)), 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         lag.text = s
+
+        gridV.aspect = b.width.toFloat() / b.height
+        gridV.visibility = if (Monitor.grid) View.VISIBLE else View.GONE
+        gridV.invalidate()
+
+        val z = a?.zebra
+        zebraImg.setImageBitmap(z)
+        zebraImg.visibility = if (z != null) View.VISIBLE else View.GONE
+        val pk = a?.peaking
+        peakImg.setImageBitmap(pk)
+        peakImg.visibility = if (pk != null) View.VISIBLE else View.GONE
+
+        histV.bins = a?.hist
+        histV.visibility = if (a?.hist != null) View.VISIBLE else View.GONE
+
+        if (a != null && Monitor.meter) {
+            evSmooth = evSmooth * 0.8f + a.ev * 0.2f
+            meterV.ev = evSmooth
+            meterBox.visibility = View.VISIBLE
+        } else {
+            meterBox.visibility = View.GONE
+        }
     }
 
     fun setState(st: CamState) {
@@ -231,25 +388,18 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     fun setProps(m: Map<Int, Prop>) {
         props = m
         bar.visibility = View.VISIBLE
-        recBtn.visibility = View.VISIBLE
         for (code in chipCodes) {
             val p = m[code]
-            val box = chipBox[code]!!
             val tv = chipVal[code]!!
-            if (p == null) {
-                box.visibility = View.GONE
-            } else {
-                box.visibility = View.VISIBLE
-                tv.text = SonyProps.fmt(code, p.current)
-                tv.setTextColor(if (p.settable) Pal.TEXT else Pal.MUTED)
-                box.background = if (pickerCode == code) roundBg(0x33FFC107.toInt(), 12, context) else null
-            }
+            tv.text = if (p == null) "—" else SonyProps.fmt(code, p.current)
+            tv.setTextColor(if (p != null && p.settable) Pal.TEXT else Pal.MUTED)
+            chipBox[code]!!.background = if (pickerCode == code) roundBg(0x33FFC107.toInt(), 12, context) else null
         }
         if (pickerCode != 0) {
             val p = m[pickerCode]
             if (p == null || !p.settable) closePicker() else highlight(p.current, false)
         }
-        val r = m[SonyProps.REC_STATE]?.current == 1L
+        val r = (m[SonyProps.REC_STATE]?.current ?: 0L) != 0L
         if (r != recording) {
             recording = r
             recBtn.pending = false
@@ -311,15 +461,21 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
     private fun clear(text: String) {
         img.setImageDrawable(null)
+        zebraImg.visibility = View.GONE
+        peakImg.visibility = View.GONE
+        gridV.visibility = View.GONE
+        histV.visibility = View.GONE
+        meterBox.visibility = View.GONE
         lag.visibility = View.GONE
         empty.text = text
         empty.visibility = View.VISIBLE
         closePicker()
         bar.visibility = View.GONE
-        recBtn.visibility = View.GONE
         recPill.visibility = View.GONE
         foreground = null
         recording = false
+        recBtn.recording = false
+        recBtn.pending = false
         removeCallbacks(ticker)
     }
 }
@@ -339,10 +495,14 @@ class MainActivity : AppCompatActivity() {
     private val clock = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
     private var solo = -1
     private lateinit var tilesRow: LinearLayout
+    private var settingsDlg: Dialog? = null
+    private var settingsParams: LinearLayout? = null
+    private var settingsSig = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Monitor.load(prefs)
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -367,16 +527,19 @@ class MainActivity : AppCompatActivity() {
         status.setPadding(dp(12), dp(5), dp(12), dp(5))
         status.background = roundBg(Pal.CARD, 14, this)
         bar.addView(status)
+        val recAllBtn = pillButton("REC A+B")
+        recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
+        recAllBtn.setOnClickListener { recBoth() }
+        val setBtn = pillButton("Impostazioni")
+        setBtn.setOnClickListener { showSettings() }
         val scanBtn = pillButton("Cerca camere")
         scanBtn.setOnClickListener { scan() }
         val logBtn = pillButton("Log")
         logBtn.setOnClickListener {
             logScroll.visibility = if (logScroll.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        val recAllBtn = pillButton("REC A+B")
-        recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
-        recAllBtn.setOnClickListener { recBoth() }
         bar.addView(recAllBtn, spaced(10))
+        bar.addView(setBtn, spaced(6))
         bar.addView(scanBtn, spaced(6))
         bar.addView(logBtn, spaced(6))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -465,7 +628,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.3: live, REC e comandi esposizione. Le camere devono essere sulla stessa rete del tablet.")
+        addLog("Doppia 0.4: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
     }
@@ -515,6 +678,236 @@ class MainActivity : AppCompatActivity() {
         status.text = if (n == 0) "nessuna camera live" else "$n di 2 live"
     }
 
+    // ---------- Impostazioni ----------
+
+    private fun showSettings() {
+        settingsDlg?.dismiss()
+        val scroll = ScrollView(this)
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(22), dp(18), dp(22), dp(18))
+        scroll.addView(col)
+
+        val head = TextView(this)
+        head.text = "Impostazioni"
+        head.setTextColor(Pal.TEXT)
+        head.textSize = 20f
+        head.typeface = Typeface.DEFAULT_BOLD
+        col.addView(head)
+
+        col.addView(sectionTitle("Monitor"))
+        col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
+        val zl = listOf(70, 80, 90, 95, 100)
+        col.addView(chooserRow("Livello zebra (%)", zl.map { it.toString() }, zl.indexOf(Monitor.zebraLevel).coerceAtLeast(0)) {
+            Monitor.zebraLevel = zl[it]; Monitor.save(prefs)
+        })
+        col.addView(toggleRow("Focus peaking", Monitor.peaking) { Monitor.peaking = it; Monitor.save(prefs) })
+        val pc = listOf(0xFFFF1744.toInt(), 0xFFFFEB3B.toInt(), 0xFFFFFFFF.toInt(), 0xFF69F0AE.toInt())
+        col.addView(chooserRow("Colore peaking", listOf("Rosso", "Giallo", "Bianco", "Verde"), pc.indexOf(Monitor.peakColor).coerceAtLeast(0)) {
+            Monitor.peakColor = pc[it]; Monitor.save(prefs)
+        })
+        col.addView(toggleRow("Griglia dei terzi", Monitor.grid) { Monitor.grid = it; Monitor.save(prefs) })
+        col.addView(toggleRow("Istogramma", Monitor.histogram) { Monitor.histogram = it; Monitor.save(prefs) })
+        col.addView(toggleRow("Esposimetro (stimato dall'immagine)", Monitor.meter) { Monitor.meter = it; Monitor.save(prefs) })
+
+        val params = LinearLayout(this)
+        params.orientation = LinearLayout.VERTICAL
+        col.addView(params)
+        settingsParams = params
+        fillParams(params)
+        settingsSig = paramSig()
+
+        col.addView(sectionTitle("Diagnostica"))
+        val copy = pillButton("Copia log e proprietà delle camere")
+        copy.setOnClickListener { copyDiagnostics() }
+        col.addView(copy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val close = pillButton("Chiudi")
+        val cl = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        cl.topMargin = dp(18)
+        cl.gravity = Gravity.END
+        col.addView(close, cl)
+
+        val dlg = Dialog(this)
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dlg.setContentView(scroll)
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.setOnDismissListener { settingsDlg = null; settingsParams = null }
+        close.setOnClickListener { dlg.dismiss() }
+        settingsDlg = dlg
+        dlg.show()
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.6f).toInt(), (resources.displayMetrics.heightPixels * 0.85f).toInt())
+    }
+
+    private val paramCodes = intArrayOf(SonyProps.EXP_MODE, SonyProps.EXP_COMP, SonyProps.METERING, SonyProps.WB)
+    private val paramNames = mapOf(
+        SonyProps.EXP_MODE to "Modo esposizione",
+        SonyProps.EXP_COMP to "Compensazione EV",
+        SonyProps.METERING to "Misurazione luce",
+        SonyProps.WB to "Bilanciamento bianco"
+    )
+
+    private fun paramSig(): String {
+        val sb = StringBuilder()
+        for (i in 0..1) {
+            sb.append(if (liveNow[i]) 'L' else '-')
+            val m = cams[i]?.props ?: continue
+            for (c in paramCodes) sb.append(m[c]?.current).append(',').append(m[c]?.settable).append(';')
+        }
+        return sb.toString()
+    }
+
+    private fun refreshSettings() {
+        val params = settingsParams ?: return
+        val sig = paramSig()
+        if (sig == settingsSig) return
+        settingsSig = sig
+        params.removeAllViews()
+        fillParams(params)
+    }
+
+    private fun fillParams(container: LinearLayout) {
+        var any = false
+        for (i in 0..1) {
+            val cam = cams[i]
+            if (cam == null || !liveNow[i]) continue
+            any = true
+            container.addView(sectionTitle(if (i == 0) "Camera A" else "Camera B"))
+            val m = cam.props
+            var rows = 0
+            for (code in paramCodes) {
+                val p = m[code] ?: continue
+                container.addView(stepperRow(paramNames[code] ?: "", cam, p))
+                rows++
+            }
+            if (rows == 0) container.addView(note("La camera non espone parametri modificabili in questa modalità."))
+        }
+        if (!any) {
+            container.addView(sectionTitle("Camere"))
+            container.addView(note("Collega una camera per cambiare i suoi parametri."))
+        }
+    }
+
+    private fun sectionTitle(text: String): TextView {
+        val t = TextView(this)
+        t.text = text.uppercase(Locale.ROOT)
+        t.setTextColor(Pal.MID)
+        t.textSize = 12f
+        t.typeface = Typeface.DEFAULT_BOLD
+        t.setPadding(0, dp(18), 0, dp(6))
+        return t
+    }
+
+    private fun note(text: String): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.setTextColor(Pal.MUTED)
+        t.textSize = 13f
+        t.setPadding(0, dp(4), 0, dp(4))
+        return t
+    }
+
+    private fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
+        val sw = SwitchCompat(this)
+        sw.text = label
+        sw.setTextColor(Pal.TEXT)
+        sw.textSize = 15f
+        sw.isChecked = checked
+        sw.setPadding(0, dp(8), 0, dp(8))
+        sw.setOnCheckedChangeListener { _, v -> onChange(v) }
+        return sw
+    }
+
+    private fun chooserRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(0, dp(6), 0, dp(6))
+        val l = TextView(this)
+        l.text = label
+        l.setTextColor(Pal.TEXT)
+        l.textSize = 15f
+        row.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val pills = ArrayList<TextView>()
+        fun paint(sel: Int) {
+            for ((k, t) in pills.withIndex()) {
+                val on = k == sel
+                t.setTextColor(if (on) Pal.MID else Pal.TEXT)
+                t.background = roundBg(if (on) 0x33FFC107 else Pal.LINE, 14, this)
+            }
+        }
+        for ((k, o) in options.withIndex()) {
+            val t = TextView(this)
+            t.text = o
+            t.textSize = 14f
+            t.typeface = Typeface.DEFAULT_BOLD
+            t.setPadding(dp(14), dp(7), dp(14), dp(7))
+            t.setOnClickListener { paint(k); onSelect(k) }
+            pills.add(t)
+            row.addView(t, spaced(6))
+        }
+        paint(selected)
+        return row
+    }
+
+    private fun stepperRow(label: String, cam: SonyCam, p: Prop): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(0, dp(6), 0, dp(6))
+        val l = TextView(this)
+        l.text = label
+        l.setTextColor(Pal.TEXT)
+        l.textSize = 15f
+        row.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val can = p.settable && p.options.isNotEmpty()
+        val idx = p.options.indexOf(p.current)
+        fun step(d: Int) {
+            if (!can) return
+            val n = (if (idx < 0) 0 else idx + d).coerceIn(0, p.options.size - 1)
+            cam.setProp(p, p.options[n])
+        }
+        val minus = pillButton("‹")
+        val plus = pillButton("›")
+        minus.setOnClickListener { step(-1) }
+        plus.setOnClickListener { step(1) }
+        minus.isEnabled = can
+        plus.isEnabled = can
+        val v = TextView(this)
+        v.text = SonyProps.fmt(p.code, p.current)
+        v.setTextColor(if (can) Pal.TEXT else Pal.MUTED)
+        v.textSize = 16f
+        v.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        v.gravity = Gravity.CENTER
+        row.addView(minus)
+        row.addView(v, LinearLayout.LayoutParams(dp(130), ViewGroup.LayoutParams.WRAP_CONTENT))
+        row.addView(plus)
+        return row
+    }
+
+    private fun copyDiagnostics() {
+        val sb = StringBuilder()
+        for (i in 0..1) {
+            val m = cams[i]?.props ?: continue
+            sb.append("== Camera ").append(if (i == 0) "A" else "B").append(" (").append(m.size).append(" proprietà)\n")
+            for (p in m.values) {
+                sb.append(String.format(Locale.ROOT, "%04X t=%X gs=%d en=%d cur=%X opts=%d",
+                    p.code, p.type, p.getSet, p.enabledFlag, p.current, p.options.size))
+                if (p.options.isNotEmpty() && p.options.size <= 40) {
+                    sb.append(" [").append(p.options.joinToString(",") { java.lang.Long.toHexString(it) }).append(']')
+                }
+                sb.append('\n')
+            }
+        }
+        sb.append("== Log\n").append(lines.joinToString("\n"))
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Doppia diagnostica", sb.toString()))
+        addLog("Diagnostica copiata negli appunti (${sb.length} caratteri)")
+    }
+
+    // ---------- Collegamento ----------
+
     private fun toggle(i: Int) {
         val running = cams[i]
         if (running != null) {
@@ -532,8 +925,11 @@ class MainActivity : AppCompatActivity() {
             ip, guid(), if (i == 0) "A" else "B",
             { s -> addLog(s) },
             { st -> runOnUiThread { onState(i, st) } },
-            { bmp, ms -> runOnUiThread { tiles[i].setFrame(bmp, ms) } },
-            { m -> runOnUiThread { tiles[i].setProps(m) } }
+            { bmp, ms ->
+                val a = Monitor.analyze(bmp)
+                runOnUiThread { tiles[i].setFrame(bmp, ms, a) }
+            },
+            { m -> runOnUiThread { tiles[i].setProps(m); refreshSettings() } }
         )
         cams[i] = cam
         cam.start()
@@ -549,6 +945,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (st == CamState.ERROR) cams[i] = null
         refreshStatus()
+        refreshSettings()
     }
 
     private fun scan() {
@@ -584,7 +981,7 @@ class MainActivity : AppCompatActivity() {
     private fun addLog(s: String) {
         runOnUiThread {
             lines.addLast(clock.format(Date()) + "  " + s)
-            while (lines.size > 200) lines.removeFirst()
+            while (lines.size > 300) lines.removeFirst()
             logText.text = lines.joinToString("\n")
             logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
         }
