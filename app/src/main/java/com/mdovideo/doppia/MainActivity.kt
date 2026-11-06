@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -32,7 +33,9 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Toast
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import com.google.android.material.button.MaterialButton
@@ -399,6 +402,10 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
+    /** Secondi di registrazione (contati dall'app da quando rileva il REC), -1 se non registra. */
+    fun recSeconds(): Int =
+        if (!recording) -1 else ((SystemClock.elapsedRealtime() - recStart) / 1000).toInt()
+
     fun setLabel(text: String) {
         labelText = text
         updateTag()
@@ -539,6 +546,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var logClose: MaterialButton
     private lateinit var recAllBtn: MaterialButton
+    private lateinit var syncBtn: MaterialButton
+    private var syncOn = false
+    private val marks = ArrayList<String>()
     private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
@@ -555,6 +565,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Monitor.load(prefs)
+        syncOn = prefs.getBoolean("sync", false)
+        (prefs.getString("marks", "") ?: "").split("\n").filter { it.isNotBlank() }.forEach { marks.add(it) }
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -585,7 +597,21 @@ class MainActivity : AppCompatActivity() {
         recAllBtn.setOnClickListener { recBoth() }
         val setBtn = pillButton("Impostazioni")
         setBtn.setOnClickListener { showSettings() }
-        bar.addView(recAllBtn, spaced(10))
+        syncBtn = pillButton("Sync")
+        syncBtn.setOnClickListener {
+            syncOn = !syncOn
+            prefs.edit().putBoolean("sync", syncOn).apply()
+            paintSync()
+            val msg = if (syncOn) "Sync attiva: le modifiche vanno su entrambe le camere" else "Sync spenta: ogni camera per conto suo"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            addLog(msg)
+        }
+        paintSync()
+        val markBtn = pillButton("⚑ Segna")
+        markBtn.setOnClickListener { markMoment() }
+        bar.addView(syncBtn, spaced(10))
+        bar.addView(markBtn, spaced(6))
+        bar.addView(recAllBtn, spaced(6))
         bar.addView(setBtn, spaced(6))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -598,7 +624,7 @@ class MainActivity : AppCompatActivity() {
             val t = tiles[i]
             t.onConnect = { toggle(i) }
             t.onRec = { cams[i]?.toggleRec() }
-            t.onPick = { p, v -> cams[i]?.setProp(p, v) }
+            t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
             t.setOnClickListener {
                 solo = if (solo == i) -1 else i
@@ -634,7 +660,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.6: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 0.7: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         if (prefs.getBoolean("auto", true)) {
@@ -663,6 +689,61 @@ class MainActivity : AppCompatActivity() {
         Springs.pressable(b)
         return b
     }
+
+    private fun paintSync() {
+        syncBtn.backgroundTintList = ColorStateList.valueOf(if (syncOn) Pal.MID else Pal.LINE)
+        syncBtn.setTextColor(if (syncOn) Pal.BG else Pal.TEXT)
+    }
+
+    private fun propLabel(code: Int): String = when (code) {
+        SonyProps.SHUTTER -> "otturatore"
+        SonyProps.APERTURE -> "diaframma"
+        SonyProps.ISO -> "ISO"
+        else -> paramNames[code]?.lowercase(Locale.ROOT) ?: "parametro"
+    }
+
+    /** Cambia un parametro sulla camera i e, con Sync accesa, sull'altra camera se live e se accetta quel valore. */
+    private fun applyProp(i: Int, p: Prop, v: Long) {
+        cams[i]?.setProp(p, v)
+        if (!syncOn) return
+        val j = 1 - i
+        val other = cams[j]
+        if (other == null || !liveNow[j]) return
+        val op = other.props[p.code]
+        if (op != null && op.settable && op.options.contains(v)) {
+            other.setProp(op, v)
+        } else {
+            val msg = "Sync: ${camName(j)} non accetta ${SonyProps.fmt(p.code, v)} per ${propLabel(p.code)}"
+            addLog(msg)
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun tc(sec: Int): String = String.format(Locale.ROOT, "%02d:%02d:%02d", sec / 3600, (sec / 60) % 60, sec % 60)
+
+    private fun saveMarks() {
+        prefs.edit().putString("marks", marks.joinToString("\n")).apply()
+    }
+
+    /** Segna un momento: ora del tablet e tempo di REC di ogni camera che sta registrando. */
+    private fun markMoment() {
+        val sb = StringBuilder(clock.format(Date()))
+        var any = false
+        for (i in 0..1) {
+            val sec = tiles[i].recSeconds()
+            if (sec < 0) continue
+            sb.append(if (any) "  ·  " else "   ").append(camName(i)).append(' ').append(tc(sec))
+            any = true
+        }
+        if (!any) sb.append("   (nessuna camera in REC)")
+        marks.add(sb.toString())
+        while (marks.size > 500) marks.removeAt(0)
+        saveMarks()
+        addLog("Momento segnato: $sb")
+        Toast.makeText(this, "⚑ Segnato $sb", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun marksText(): String = marks.joinToString("\n")
 
     private fun camName(i: Int): String {
         val n = (prefs.getString("name$i", "") ?: "").trim()
@@ -747,6 +828,53 @@ class MainActivity : AppCompatActivity() {
         settingsParams = params
         fillParams(params)
         settingsSig = paramSig()
+
+        val markTitle = sectionTitle("Momenti segnati (${marks.size})")
+        col.addView(markTitle)
+        val markText = TextView(this)
+        markText.setTextColor(Pal.TEXT)
+        markText.textSize = 12.5f
+        markText.typeface = Typeface.MONOSPACE
+        markText.text = if (marks.isEmpty()) "Nessun momento. Tocca ⚑ Segna in alto durante le riprese." else marksText()
+        col.addView(markText)
+        val mrow = LinearLayout(this)
+        mrow.orientation = LinearLayout.HORIZONTAL
+        val mcopy = pillButton("Copia")
+        mcopy.setOnClickListener {
+            if (marks.isEmpty()) return@setOnClickListener
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Momenti segnati", marksText()))
+            Toast.makeText(this, "Elenco copiato", Toast.LENGTH_SHORT).show()
+        }
+        val mshare = pillButton("Condividi")
+        mshare.setOnClickListener {
+            if (marks.isEmpty()) return@setOnClickListener
+            val it2 = Intent(Intent.ACTION_SEND)
+            it2.type = "text/plain"
+            it2.putExtra(Intent.EXTRA_SUBJECT, "Momenti segnati - Doppia")
+            it2.putExtra(Intent.EXTRA_TEXT, marksText())
+            startActivity(Intent.createChooser(it2, "Condividi elenco"))
+        }
+        val mclear = pillButton("Svuota")
+        mclear.setOnClickListener {
+            if (marks.isEmpty()) return@setOnClickListener
+            AlertDialog.Builder(this)
+                .setMessage("Cancellare tutti i momenti segnati?")
+                .setPositiveButton("Cancella") { _, _ ->
+                    marks.clear()
+                    saveMarks()
+                    markTitle.text = "MOMENTI SEGNATI (0)"
+                    markText.text = "Nessun momento. Tocca ⚑ Segna in alto durante le riprese."
+                }
+                .setNegativeButton("Annulla", null)
+                .show()
+        }
+        mrow.addView(mcopy)
+        mrow.addView(mshare, spaced(6))
+        mrow.addView(mclear, spaced(6))
+        val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        mlp.topMargin = dp(8)
+        col.addView(mrow, mlp)
 
         col.addView(sectionTitle("Diagnostica"))
         val copy = pillButton("Copia log e proprietà delle camere")
@@ -879,7 +1007,7 @@ class MainActivity : AppCompatActivity() {
             var rows = 0
             for (code in paramCodes) {
                 val p = m[code] ?: continue
-                container.addView(stepperRow(paramNames[code] ?: "", cam, p))
+                container.addView(stepperRow(paramNames[code] ?: "", i, cam, p))
                 rows++
             }
             if (rows == 0) container.addView(note("La camera non espone parametri modificabili in questa modalità."))
@@ -952,7 +1080,7 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    private fun stepperRow(label: String, cam: SonyCam, p: Prop): View {
+    private fun stepperRow(label: String, i: Int, cam: SonyCam, p: Prop): View {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
@@ -968,7 +1096,7 @@ class MainActivity : AppCompatActivity() {
         fun step(d: Int) {
             if (!can) return
             val n = (if (idx < 0) 0 else idx + d).coerceIn(0, p.options.size - 1)
-            cam.setProp(p, p.options[n])
+            applyProp(i, p, p.options[n])
         }
         val minus = pillButton("‹")
         val plus = pillButton("›")

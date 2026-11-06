@@ -1,4 +1,4 @@
-# Doppia 0.6 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 0.7 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -41,6 +41,10 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Collegamento automatico** all'avvio per le camere con IP salvato (si spegne in Impostazioni > Camere).
 - **REC A+B** grigio finche' nessuna camera e' live.
 - **Puntino di stato** accanto al nome nel riquadro: grigio spenta, giallo in collegamento, verde live, rosso errore.
+
+## Novita' 0.7
+- **Sync**: tasto in alto, giallo quando e' attivo. Con Sync accesa, ogni modifica di otturatore, diaframma, ISO, modo esposizione, compensazione EV, misurazione e bilanciamento bianco su una camera viene applicata anche all'altra (se e' live e accetta quel valore; altrimenti lo dice nel log).
+- **⚑ Segna**: segna un momento con l'ora e il tempo di REC di ogni camera che registra. L'elenco e' in Impostazioni (Copia, Condividi, Svuota) e resta salvato.
 
 ## Da fare dopo la prova
 REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.
