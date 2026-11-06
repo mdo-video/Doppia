@@ -2,12 +2,14 @@ package com.mdovideo.doppia
 
 import android.app.Dialog
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -16,6 +18,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
 import android.os.SystemClock
 import android.text.Editable
@@ -36,14 +39,17 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Toast
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -167,6 +173,58 @@ class GridView(ctx: Context) : View(ctx) {
     }
 }
 
+/** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
+class IconButton(ctx: Context) : View(ctx) {
+    enum class Kind { CAMERA, SHARE, LAYERS }
+
+    var kind = Kind.CAMERA
+        set(v) { field = v; invalidate() }
+    var active = false
+        set(v) { field = v; invalidate() }
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = ctx.dp(2).toFloat()
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        bg.color = if (active) 0xF2FFC107.toInt() else 0xCC0B0F15.toInt()
+        c.drawCircle(w / 2f, h / 2f, w / 2f, bg)
+        val ink = if (active) Pal.BG else Color.WHITE
+        stroke.color = ink
+        fill.color = ink
+        when (kind) {
+            Kind.CAMERA -> {
+                c.drawRoundRect(w * 0.26f, h * 0.36f, w * 0.74f, h * 0.68f, w * 0.06f, w * 0.06f, stroke)
+                c.drawLine(w * 0.40f, h * 0.36f, w * 0.44f, h * 0.29f, stroke)
+                c.drawLine(w * 0.44f, h * 0.29f, w * 0.56f, h * 0.29f, stroke)
+                c.drawLine(w * 0.56f, h * 0.29f, w * 0.60f, h * 0.36f, stroke)
+                c.drawCircle(w / 2f, h * 0.52f, w * 0.08f, stroke)
+            }
+            Kind.SHARE -> {
+                val ax = w * 0.70f; val ay = h * 0.30f
+                val bx = w * 0.30f; val by = h * 0.50f
+                val cx = w * 0.70f; val cy = h * 0.70f
+                c.drawLine(bx, by, ax, ay, stroke)
+                c.drawLine(bx, by, cx, cy, stroke)
+                val r = w * 0.075f
+                c.drawCircle(ax, ay, r, fill)
+                c.drawCircle(bx, by, r, fill)
+                c.drawCircle(cx, cy, r, fill)
+            }
+            Kind.LAYERS -> {
+                c.drawRoundRect(w * 0.28f, h * 0.26f, w * 0.62f, h * 0.58f, w * 0.05f, w * 0.05f, stroke)
+                c.drawRoundRect(w * 0.38f, h * 0.42f, w * 0.72f, h * 0.74f, w * 0.05f, w * 0.05f, stroke)
+            }
+        }
+    }
+}
+
 /** Un riquadro con il live di una camera, in stile monitor Sony: REC, otturatore / diaframma / ISO, esposimetro, istogramma. */
 class Tile(ctx: Context, private val label: String, private val accent: Int) : FrameLayout(ctx) {
     private val img = ImageView(ctx)
@@ -196,6 +254,28 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private var recStart = 0L
     private var labelText = label
     private var camState = CamState.IDLE
+
+    // Screenshot / condividi e sovrapposizione
+    private val overlayImg = ImageView(ctx)
+    private val side = LinearLayout(ctx)
+    private val shotBtn = IconButton(ctx)
+    private val ovlBtn = IconButton(ctx)
+    private val ovlPanel = LinearLayout(ctx)
+    private val ovlLabel = TextView(ctx)
+    private val ovlSeek = SeekBar(ctx)
+    private var lastFrame: Bitmap? = null
+    private var overlayBmp: Bitmap? = null
+    private var hasFrame = false
+    private val shotRevert = Runnable {
+        shotBtn.kind = IconButton.Kind.CAMERA
+        shotBtn.active = false
+    }
+    var onShot: (() -> Unit)? = null
+    var onShare: (() -> Unit)? = null
+    var onOvlLast: (() -> Unit)? = null
+    var onOvlPick: (() -> Unit)? = null
+    var onOvlClear: (() -> Unit)? = null
+    var onOvlOpacity: ((Int) -> Unit)? = null
     private var evSmooth = 0f
     private val borderRed = GradientDrawable().apply {
         setColor(0)
@@ -236,6 +316,10 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         clipToOutline = true
         img.scaleType = ImageView.ScaleType.FIT_CENTER
         addView(img, full())
+        overlayImg.scaleType = ImageView.ScaleType.FIT_CENTER
+        overlayImg.alpha = 0.5f
+        overlayImg.visibility = View.GONE
+        addView(overlayImg, full())
         zebraImg.scaleType = ImageView.ScaleType.FIT_CENTER
         zebraImg.visibility = View.GONE
         addView(zebraImg, full())
@@ -374,10 +458,119 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         pkLp.gravity = Gravity.BOTTOM
         pkLp.setMargins(dp(12), 0, dp(12), dp(88))
         addView(picker, pkLp)
+
+        // Pulsanti a destra: screenshot (poi condividi) e sovrapposizione
+        side.orientation = LinearLayout.VERTICAL
+        side.gravity = Gravity.CENTER_HORIZONTAL
+        side.visibility = View.GONE
+        shotBtn.setOnClickListener {
+            if (shotBtn.kind == IconButton.Kind.SHARE) {
+                removeCallbacks(shotRevert)
+                shotRevert.run()
+                onShare?.invoke()
+            } else {
+                onShot?.invoke()
+            }
+        }
+        ovlBtn.kind = IconButton.Kind.LAYERS
+        ovlBtn.setOnClickListener {
+            ovlPanel.visibility = if (ovlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        side.addView(shotBtn, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val ovlLp = LinearLayout.LayoutParams(dp(46), dp(46))
+        ovlLp.topMargin = dp(10)
+        side.addView(ovlBtn, ovlLp)
+        val sdLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        sdLp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        sdLp.rightMargin = dp(12)
+        addView(side, sdLp)
+
+        // Pannello della sovrapposizione: cursore opacita' (50% di partenza) e scelta dell'immagine
+        ovlPanel.orientation = LinearLayout.VERTICAL
+        ovlPanel.background = roundBg(0xEE0B0F15.toInt(), 16, ctx)
+        ovlPanel.setPadding(dp(14), dp(10), dp(14), dp(12))
+        ovlPanel.isClickable = true
+        ovlPanel.visibility = View.GONE
+        ovlLabel.setTextColor(Pal.TEXT)
+        ovlLabel.textSize = 13f
+        ovlLabel.typeface = Typeface.DEFAULT_BOLD
+        ovlLabel.text = "Sovrapposizione  50%"
+        ovlPanel.addView(ovlLabel)
+        ovlSeek.max = 100
+        ovlSeek.progress = 50
+        ovlSeek.progressTintList = ColorStateList.valueOf(Pal.MID)
+        ovlSeek.thumbTintList = ColorStateList.valueOf(Pal.MID)
+        ovlSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                ovlLabel.text = "Sovrapposizione  $p%"
+                overlayImg.alpha = p / 100f
+                if (fromUser) onOvlOpacity?.invoke(p)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        ovlPanel.addView(ovlSeek, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val prow = LinearLayout(ctx)
+        prow.orientation = LinearLayout.HORIZONTAL
+        fun ovlPill(text: String, action: () -> Unit, first: Boolean) {
+            val t = TextView(ctx)
+            t.text = text
+            t.textSize = 13f
+            t.typeface = Typeface.DEFAULT_BOLD
+            t.setTextColor(Pal.TEXT)
+            t.background = roundBg(Pal.LINE, 14, ctx)
+            t.setPadding(dp(12), dp(7), dp(12), dp(7))
+            t.setOnClickListener { action() }
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (!first) lp.leftMargin = dp(6)
+            prow.addView(t, lp)
+        }
+        ovlPill("Ultimo", { onOvlLast?.invoke() }, true)
+        ovlPill("Galleria", { onOvlPick?.invoke() }, false)
+        ovlPill("Togli", { onOvlClear?.invoke() }, false)
+        val prLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        prLp.topMargin = dp(6)
+        ovlPanel.addView(prow, prLp)
+        val note = TextView(ctx)
+        note.text = "Ultimo = l'ultimo screenshot di questa camera"
+        note.textSize = 11f
+        note.setTextColor(Pal.MUTED)
+        note.setPadding(0, dp(6), 0, 0)
+        ovlPanel.addView(note)
+        val pnLp = LayoutParams(dp(280), ViewGroup.LayoutParams.WRAP_CONTENT)
+        pnLp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        pnLp.rightMargin = dp(12 + 46 + 10)
+        addView(ovlPanel, pnLp)
+    }
+
+    /** Ultimo fotogramma ricevuto (senza strumenti sopra), per lo screenshot. */
+    fun frame(): Bitmap? = lastFrame
+
+    /** Screenshot salvato: il pulsante diventa Condividi (torna fotocamera dopo la condivisione o 20 secondi). */
+    fun shotReady() {
+        shotBtn.kind = IconButton.Kind.SHARE
+        shotBtn.active = true
+        removeCallbacks(shotRevert)
+        postDelayed(shotRevert, 20000)
+    }
+
+    /** Immagine di confronto sopra il live; null per toglierla. */
+    fun setOverlay(b: Bitmap?, opacity: Int) {
+        overlayBmp = b
+        overlayImg.setImageBitmap(b)
+        ovlSeek.progress = opacity
+        overlayImg.alpha = opacity / 100f
+        ovlLabel.text = "Sovrapposizione  $opacity%"
+        ovlBtn.active = b != null
+        overlayImg.visibility = if (b != null && hasFrame) View.VISIBLE else View.GONE
     }
 
     fun setFrame(b: Bitmap, ms: Int, a: Analysis?) {
         img.setImageBitmap(b)
+        lastFrame = b
+        hasFrame = true
+        side.visibility = View.VISIBLE
+        overlayImg.visibility = if (overlayBmp != null) View.VISIBLE else View.GONE
         msgBox.visibility = View.GONE
         lag.visibility = View.VISIBLE
         val s = SpannableString("● $ms ms")
@@ -523,6 +716,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
     private fun clear(text: String, btn: String) {
         img.setImageDrawable(null)
+        lastFrame = null
+        hasFrame = false
+        side.visibility = View.GONE
+        overlayImg.visibility = View.GONE
+        ovlPanel.visibility = View.GONE
+        removeCallbacks(shotRevert)
+        shotRevert.run()
         zebraImg.visibility = View.GONE
         peakImg.visibility = View.GONE
         gridV.visibility = View.GONE
@@ -556,6 +756,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updBtn: MaterialButton
     private var pendingUpdate: Updater.Release? = null
     @Volatile private var updCancel = false
+    private var pickFor = -1
+    private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val i = pickFor
+        if (uri != null && i in 0..1) importOverlay(i, uri)
+    }
     private val marks = ArrayList<String>()
     private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
@@ -637,6 +842,12 @@ class MainActivity : AppCompatActivity() {
         for (i in 0..1) {
             val t = tiles[i]
             t.onConnect = { toggle(i) }
+            t.onShot = { takeShot(i) }
+            t.onShare = { shareShot(i) }
+            t.onOvlLast = { overlayFromLast(i) }
+            t.onOvlPick = { pickFor = i; pickImage.launch("image/*") }
+            t.onOvlClear = { overlayClear(i) }
+            t.onOvlOpacity = { pct -> prefs.edit().putInt("ovlop$i", pct).apply() }
             t.onRec = { cams[i]?.toggleRec() }
             t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
@@ -649,6 +860,11 @@ class MainActivity : AppCompatActivity() {
             tilesRow.addView(t, lp)
         }
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        for (i in 0..1) {
+            val f = overlayFile(i)
+            val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
+            tiles[i].setOverlay(bmp, prefs.getInt("ovlop$i", 50))
+        }
 
         logText = TextView(this)
         logText.setTextColor(Pal.TEXT)
@@ -674,7 +890,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.8: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 0.9: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -706,6 +922,140 @@ class MainActivity : AppCompatActivity() {
         b.insetBottom = 0
         Springs.pressable(b)
         return b
+    }
+
+    // ---------- Screenshot e sovrapposizione ----------
+
+    private fun shotDir(): File = File(filesDir, "shots").also { it.mkdirs() }
+
+    private fun shotFile(i: Int): File? {
+        val n = prefs.getString("shot$i", "") ?: ""
+        if (n.isEmpty()) return null
+        val f = File(shotDir(), n)
+        return if (f.exists()) f else null
+    }
+
+    private fun overlayFile(i: Int): File = File(filesDir, "overlay$i.jpg")
+
+    /** Screenshot del live di una camera (senza strumenti sopra): copia nell'app e, da Android 10, in Immagini/Doppia. */
+    private fun takeShot(i: Int) {
+        val src = tiles[i].frame()
+        val bmp = src?.copy(Bitmap.Config.ARGB_8888, false)
+        if (bmp == null) {
+            Toast.makeText(this, "Nessuna immagine da salvare", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(Date())
+        val name = "Doppia_" + camName(i).replace(Regex("[^A-Za-z0-9_-]+"), "_") + "_" + stamp + ".jpg"
+        Thread {
+            try {
+                val old = prefs.getString("shot$i", "") ?: ""
+                if (old.isNotEmpty()) File(shotDir(), old).delete()
+                FileOutputStream(File(shotDir(), name)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                prefs.edit().putString("shot$i", name).apply()
+                var where = "nell'app"
+                if (Build.VERSION.SDK_INT >= 29) {
+                    val cv = ContentValues()
+                    cv.put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                    cv.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    cv.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Doppia")
+                    cv.put(MediaStore.Images.Media.IS_PENDING, 1)
+                    val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv)
+                    if (uri != null) {
+                        contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                        cv.clear()
+                        cv.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        contentResolver.update(uri, cv, null, null)
+                        where = "in Immagini/Doppia"
+                    }
+                }
+                addLog("Screenshot ${camName(i)}: $name ($where)")
+                runOnUiThread {
+                    tiles[i].shotReady()
+                    Toast.makeText(this, "Screenshot salvato $where", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Throwable) {
+                addLog("Screenshot: ${e.message ?: e.javaClass.simpleName}")
+                runOnUiThread { Toast.makeText(this, "Screenshot non riuscito", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    /** Apre il menu di condivisione (WhatsApp ecc.) con l'ultimo screenshot della camera. */
+    private fun shareShot(i: Int) {
+        val f = shotFile(i)
+        if (f == null) {
+            Toast.makeText(this, "Nessuno screenshot da condividere", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val send = Intent(Intent.ACTION_SEND)
+            send.type = "image/jpeg"
+            send.putExtra(Intent.EXTRA_STREAM, uri)
+            send.clipData = ClipData.newRawUri("", uri)
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(send, "Condividi screenshot"))
+        } catch (e: Throwable) {
+            addLog("Condividi: ${e.message ?: e.javaClass.simpleName}")
+            Toast.makeText(this, "Condivisione non riuscita", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Legge un'immagine riducendola (lato lungo tra maxDim e 2 x maxDim) per non occupare troppa memoria. */
+    private fun decodeScaled(open: () -> java.io.InputStream?, maxDim: Int): Bitmap? {
+        val o = BitmapFactory.Options()
+        o.inJustDecodeBounds = true
+        open()?.use { BitmapFactory.decodeStream(it, null, o) }
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= maxDim) sample *= 2
+        val o2 = BitmapFactory.Options()
+        o2.inSampleSize = sample
+        return open()?.use { BitmapFactory.decodeStream(it, null, o2) }
+    }
+
+    private fun setOverlayFrom(i: Int, bmp: Bitmap) {
+        FileOutputStream(overlayFile(i)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        val op = prefs.getInt("ovlop$i", 50)
+        runOnUiThread {
+            tiles[i].setOverlay(bmp, op)
+            Toast.makeText(this, "Sovrapposizione impostata su ${camName(i)}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun importOverlay(i: Int, uri: Uri) {
+        Thread {
+            try {
+                val bmp = decodeScaled({ contentResolver.openInputStream(uri) }, 1920)
+                if (bmp == null) runOnUiThread { Toast.makeText(this, "Immagine non leggibile", Toast.LENGTH_LONG).show() }
+                else setOverlayFrom(i, bmp)
+            } catch (e: Throwable) {
+                addLog("Sovrapposizione: ${e.message ?: e.javaClass.simpleName}")
+                runOnUiThread { Toast.makeText(this, "Sovrapposizione non riuscita", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun overlayFromLast(i: Int) {
+        val f = shotFile(i)
+        if (f == null) {
+            Toast.makeText(this, "Nessuno screenshot di ${camName(i)}: toccane uno prima", Toast.LENGTH_LONG).show()
+            return
+        }
+        Thread {
+            try {
+                val bmp = decodeScaled({ java.io.FileInputStream(f) }, 1920)
+                if (bmp != null) setOverlayFrom(i, bmp)
+            } catch (e: Throwable) {
+                addLog("Sovrapposizione: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }.start()
+    }
+
+    private fun overlayClear(i: Int) {
+        overlayFile(i).delete()
+        tiles[i].setOverlay(null, prefs.getInt("ovlop$i", 50))
     }
 
     // ---------- Aggiornamenti ----------

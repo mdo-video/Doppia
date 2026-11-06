@@ -1,4 +1,4 @@
-# Doppia 0.8 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 0.9 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,10 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 0.9
+- **Screenshot** per ogni camera: pulsante tondo a destra del riquadro. Salva il fotogramma pulito (senza zebra e strumenti) in Immagini/Doppia e il pulsante diventa **Condividi**, che apre il menu di condivisione (WhatsApp ecc.).
+- **Sovrapposizione**: pulsante a livelli sotto lo screenshot. Metti un'immagine (ultimo screenshot della camera oppure dalla Galleria) sopra il live per rifare la stessa inquadratura di un'altra giornata. Cursore di opacita' (50% di partenza); l'immagine resta salvata per ogni camera.
 
 ## Da fare dopo la prova
 REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.
