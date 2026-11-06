@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -13,7 +14,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.os.SystemClock
 import android.text.Editable
 import android.text.InputType
@@ -38,7 +41,9 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -548,6 +553,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recAllBtn: MaterialButton
     private lateinit var syncBtn: MaterialButton
     private var syncOn = false
+    private lateinit var updBtn: MaterialButton
+    private var pendingUpdate: Updater.Release? = null
+    @Volatile private var updCancel = false
     private val marks = ArrayList<String>()
     private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
@@ -591,6 +599,12 @@ class MainActivity : AppCompatActivity() {
         status.setPadding(dp(12), dp(5), dp(12), dp(5))
         status.background = roundBg(Pal.CARD, 14, this)
         bar.addView(status, spaced(12))
+        updBtn = pillButton("⬆ Aggiorna")
+        updBtn.backgroundTintList = ColorStateList.valueOf(Pal.MID)
+        updBtn.setTextColor(Pal.BG)
+        updBtn.visibility = View.GONE
+        updBtn.setOnClickListener { pendingUpdate?.let { showUpdateDialog(it) } }
+        bar.addView(updBtn, spaced(8))
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         recAllBtn = pillButton("REC A+B")
         recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
@@ -660,9 +674,13 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.7: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 0.8: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
+        Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
+        if (prefs.getBoolean("autoupd", true) && System.currentTimeMillis() - prefs.getLong("lastupd", 0L) > 6 * 3600_000L) {
+            checkUpdate(false)
+        }
         if (prefs.getBoolean("auto", true)) {
             for (i in 0..1) {
                 val ip = (prefs.getString("ip$i", "") ?: "").trim()
@@ -688,6 +706,115 @@ class MainActivity : AppCompatActivity() {
         b.insetBottom = 0
         Springs.pressable(b)
         return b
+    }
+
+    // ---------- Aggiornamenti ----------
+
+    private fun installedName(): String =
+        try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (_: Throwable) { "?" }
+
+    @Suppress("DEPRECATION")
+    private fun installedCode(): Long {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        return if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+    }
+
+    /** Cerca l'ultima release su GitHub. Automatico: silenzioso, mostra solo il tasto giallo. Manuale: risponde sempre. */
+    private fun checkUpdate(manual: Boolean) {
+        if (manual) Toast.makeText(this, "Cerco aggiornamenti…", Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val r = Updater.latest(BuildConfig.UPDATE_REPO)
+                prefs.edit().putLong("lastupd", System.currentTimeMillis()).apply()
+                runOnUiThread {
+                    if (r != null && r.build + 1L > installedCode()) {
+                        pendingUpdate = r
+                        updBtn.visibility = View.VISIBLE
+                        addLog("Aggiornamento disponibile: ${r.name} (installata ${installedName()})")
+                        if (manual) showUpdateDialog(r)
+                    } else {
+                        pendingUpdate = null
+                        updBtn.visibility = View.GONE
+                        addLog("Nessun aggiornamento (versione ${installedName()})")
+                        if (manual) Toast.makeText(this, "Hai già l'ultima versione (${installedName()})", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Throwable) {
+                val msg = e.message ?: e.javaClass.simpleName
+                addLog("Aggiornamenti: $msg")
+                if (manual) runOnUiThread { Toast.makeText(this, "Aggiornamenti: $msg", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun showUpdateDialog(r: Updater.Release) {
+        val mb = if (r.size > 0) String.format(Locale.ROOT, " (%.1f MB)", r.size / 1048576.0) else ""
+        val notes = r.notes.trim().take(500)
+        AlertDialog.Builder(this)
+            .setTitle("Nuova versione disponibile")
+            .setMessage("Installata: ${installedName()}\nNuova: ${r.name}$mb" + (if (notes.isNotEmpty()) "\n\n$notes" else ""))
+            .setPositiveButton("Aggiorna") { _, _ -> startUpdate(r) }
+            .setNegativeButton("Più tardi", null)
+            .show()
+    }
+
+    private fun startUpdate(r: Updater.Release) {
+        if (tiles.any { it.recording }) {
+            Toast.makeText(this, "Una camera sta registrando: ferma il REC prima di aggiornare", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!packageManager.canRequestPackageInstalls()) {
+            AlertDialog.Builder(this)
+                .setMessage("Per installare l'aggiornamento devi permettere a Doppia di installare app. Nella schermata che si apre attiva l'interruttore, poi torna qui e tocca di nuovo Aggiorna.")
+                .setPositiveButton("Apri impostazioni") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton("Annulla", null)
+                .show()
+            return
+        }
+        val dir = File(cacheDir, "update")
+        dir.mkdirs()
+        val dest = File(dir, "Doppia.apk")
+        updCancel = false
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Scarico ${r.name}")
+            .setMessage("0%")
+            .setCancelable(false)
+            .setNegativeButton("Annulla") { _, _ -> updCancel = true }
+            .create()
+        dlg.show()
+        Thread {
+            try {
+                Updater.download(r.apkUrl, dest, r.size, { updCancel }) { pct -> runOnUiThread { dlg.setMessage("$pct%") } }
+                runOnUiThread { dlg.dismiss(); installApk(dest) }
+            } catch (e: Throwable) {
+                val msg = e.message ?: e.javaClass.simpleName
+                addLog("Download aggiornamento: $msg")
+                runOnUiThread {
+                    dlg.dismiss()
+                    if (!updCancel) Toast.makeText(this, "Download non riuscito: $msg", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun installApk(f: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(f.path, 0)
+            if (info == null || info.packageName != packageName) {
+                Toast.makeText(this, "Il file scaricato non è valido", Toast.LENGTH_LONG).show()
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val i = Intent(Intent.ACTION_VIEW)
+            i.setDataAndType(uri, "application/vnd.android.package-archive")
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+        } catch (e: Throwable) {
+            addLog("Installazione: ${e.message ?: e.javaClass.simpleName}")
+            Toast.makeText(this, "Installazione non riuscita", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun paintSync() {
@@ -875,6 +1002,17 @@ class MainActivity : AppCompatActivity() {
         val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mlp.topMargin = dp(8)
         col.addView(mrow, mlp)
+
+        col.addView(sectionTitle("Aggiornamenti"))
+        col.addView(note("Versione installata: ${installedName()}"))
+        col.addView(toggleRow("Cerca aggiornamenti all'avvio", prefs.getBoolean("autoupd", true)) {
+            prefs.edit().putBoolean("autoupd", it).apply()
+        })
+        val updCheck = pillButton("Cerca aggiornamenti")
+        updCheck.setOnClickListener { checkUpdate(true) }
+        val ulp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        ulp.topMargin = dp(6)
+        col.addView(updCheck, ulp)
 
         col.addView(sectionTitle("Diagnostica"))
         val copy = pillButton("Copia log e proprietà delle camere")

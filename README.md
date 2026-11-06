@@ -1,4 +1,4 @@
-# Doppia 0.7 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 0.8 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -45,6 +45,11 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 ## Novita' 0.7
 - **Sync**: tasto in alto, giallo quando e' attivo. Con Sync accesa, ogni modifica di otturatore, diaframma, ISO, modo esposizione, compensazione EV, misurazione e bilanciamento bianco su una camera viene applicata anche all'altra (se e' live e accetta quel valore; altrimenti lo dice nel log).
 - **⚑ Segna**: segna un momento con l'ora e il tempo di REC di ogni camera che registra. L'elenco e' in Impostazioni (Copia, Condividi, Svuota) e resta salvato.
+
+## Novita' 0.8
+- **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
+- Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
+- L'aggiornamento non parte se una camera sta registrando.
 
 ## Da fare dopo la prova
 REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.
