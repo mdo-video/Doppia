@@ -41,3 +41,15 @@ jobs:
         with:
           name: Doppia-APK
           path: app/build/outputs/apk/debug/*.apk
+      - name: Pubblica release (per gli aggiornamenti dell'app)
+        if: hashFiles('settings.gradle.kts') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          cp "$apk" Doppia.apk
+          base=$(grep -o 'versionName = "[0-9]*\.[0-9]*' app/build.gradle.kts | grep -o '[0-9]*\.[0-9]*$')
+          ver="$base.$GITHUB_RUN_NUMBER"
+          awk -v h="## Novita' $base" 'index($0,h)==1{f=1;next} /^## /{f=0} f' README.md > notes.md
+          [ -s notes.md ] || echo "Compilazione $GITHUB_RUN_NUMBER" > notes.md
+          gh release create "build-$GITHUB_RUN_NUMBER" Doppia.apk --title "Doppia $ver" --notes-file notes.md --latest
