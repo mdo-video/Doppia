@@ -66,8 +66,14 @@ class PtpIpClient(
 
         val nameBytes = (deviceName + "\u0000").toByteArray(Charsets.UTF_16LE)
         send(cout, T_INIT_CMD, guid + nameBytes + le32(0x00010000))
+        // Con l'associazione la camera aspetta che l'utente prema OK: tempo lungo per la risposta.
+        cs.soTimeout = 60000
         val ack = readPacket(cin)
-        if (ack.type == T_INIT_FAIL) throw IllegalStateException("La camera ha rifiutato la connessione (InitFail)")
+        cs.soTimeout = timeoutMs
+        if (ack.type == T_INIT_FAIL) {
+            val reason = if (ack.payload.size >= 4) ByteBuffer.wrap(ack.payload, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int else -1
+            throw IllegalStateException("La camera ha rifiutato la connessione (InitFail, motivo $reason). Se e' la prima volta, apri Associazione sulla camera e premi OK quando chiede il permesso")
+        }
         if (ack.type != T_INIT_CMD_ACK || ack.payload.size < 4) {
             throw IllegalStateException("Risposta inattesa dalla camera (tipo ${ack.type})")
         }
