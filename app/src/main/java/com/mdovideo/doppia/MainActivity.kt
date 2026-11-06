@@ -33,6 +33,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -238,6 +239,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val connectBtn = MaterialButton(ctx)
 
     private val recPill = TextView(ctx)
+    private val batt = TextView(ctx)
     private val recBtn = RecButton(ctx)
     private val bar = LinearLayout(ctx)
     private val meterBox = LinearLayout(ctx)
@@ -287,6 +289,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     var recording = false
         private set
     var onRec: (() -> Unit)? = null
+    /** Chiamata quando la camera inizia (true) o finisce (false) di registrare. */
+    var onRecChange: ((Boolean) -> Unit)? = null
     var onConnect: (() -> Unit)? = null
     var onPick: ((Prop, Long) -> Unit)? = null
 
@@ -363,6 +367,17 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         tp.gravity = Gravity.TOP or Gravity.START
         tp.setMargins(dp(12), dp(12), 0, 0)
         addView(tag, tp)
+
+        // Avviso batteria scarica, sotto il nome
+        batt.textSize = 13f
+        batt.typeface = Typeface.DEFAULT_BOLD
+        batt.setPadding(dp(10), dp(4), dp(10), dp(4))
+        batt.background = roundBg(0xCC0B0F15.toInt(), 12, ctx)
+        batt.visibility = View.GONE
+        val bp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        bp.gravity = Gravity.TOP or Gravity.START
+        bp.setMargins(dp(12), dp(52), 0, 0)
+        addView(batt, bp)
 
         lag.setTextColor(Pal.TEXT)
         lag.textSize = 12f
@@ -604,6 +619,16 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     fun recSeconds(): Int =
         if (!recording) -1 else ((SystemClock.elapsedRealtime() - recStart) / 1000).toInt()
 
+    /** Millisecondi di registrazione dal momento in cui l'app ha rilevato il REC, -1 se non registra. */
+    fun recElapsedMs(): Long =
+        if (!recording) -1L else SystemClock.elapsedRealtime() - recStart
+
+    /** Tally grande: cornice rossa spessa e pillola REC piu' grande, visibili da lontano. */
+    fun setBigTally(on: Boolean) {
+        borderRed.setStroke(dp(if (on) 12 else 4), 0xFFE53935.toInt())
+        recPill.textSize = if (on) 22f else 14f
+    }
+
     fun setLabel(text: String) {
         labelText = text
         updateTag()
@@ -654,6 +679,14 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             val p = m[pickerCode]
             if (p == null || !p.settable) closePicker() else highlight(p.current, false)
         }
+        val bl = SonyProps.batteryPercent(m)
+        if (bl != null && bl <= 25) {
+            batt.text = "🔋 $bl%"
+            batt.setTextColor(if (bl <= 10) 0xFFEF5350.toInt() else Pal.MID)
+            batt.visibility = View.VISIBLE
+        } else {
+            batt.visibility = View.GONE
+        }
         val r = (m[SonyProps.REC_STATE]?.current ?: 0L) != 0L
         if (r != recording) {
             recording = r
@@ -669,6 +702,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
                 recPill.visibility = View.GONE
                 removeCallbacks(ticker)
             }
+            onRecChange?.invoke(r)
         }
     }
 
@@ -736,10 +770,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         bar.visibility = View.GONE
         recPill.visibility = View.GONE
         foreground = null
+        batt.visibility = View.GONE
+        val was = recording
         recording = false
         recBtn.recording = false
         recBtn.pending = false
         removeCallbacks(ticker)
+        if (was) onRecChange?.invoke(false)
     }
 }
 
@@ -761,7 +798,7 @@ class MainActivity : AppCompatActivity() {
         val i = pickFor
         if (uri != null && i in 0..1) importOverlay(i, uri)
     }
-    private val marks = ArrayList<String>()
+    private lateinit var rootView: LinearLayout
     private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
@@ -779,13 +816,14 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Monitor.load(prefs)
         syncOn = prefs.getBoolean("sync", false)
-        (prefs.getString("marks", "") ?: "").split("\n").filter { it.isNotBlank() }.forEach { marks.add(it) }
+        Session.load(prefs)
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(Pal.BG)
         root.fitsSystemWindows = true
         root.setPadding(dp(14), dp(10), dp(14), dp(12))
+        rootView = root
 
         // Barra in alto: titolo + indicatore camere a sinistra, REC A+B e Impostazioni a destra
         val bar = LinearLayout(this)
@@ -826,10 +864,22 @@ class MainActivity : AppCompatActivity() {
             addLog(msg)
         }
         paintSync()
-        val markBtn = pillButton("⚑ Segna")
-        markBtn.setOnClickListener { markMoment() }
+        val goodBtn = pillButton("⚑ Buona")
+        goodBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.GOOD])
+        goodBtn.setTextColor(Pal.BG)
+        goodBtn.setOnClickListener { addMark(MarkCat.GOOD, "") }
+        val badBtn = pillButton("⚑ Scarto")
+        badBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.BAD])
+        badBtn.setTextColor(Pal.BG)
+        badBtn.setOnClickListener { addMark(MarkCat.BAD, "") }
+        val noteBtn = pillButton("⚑ Nota")
+        noteBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
+        noteBtn.setTextColor(Pal.BG)
+        noteBtn.setOnClickListener { noteDialog() }
         bar.addView(syncBtn, spaced(10))
-        bar.addView(markBtn, spaced(6))
+        bar.addView(goodBtn, spaced(6))
+        bar.addView(badBtn, spaced(6))
+        bar.addView(noteBtn, spaced(6))
         bar.addView(recAllBtn, spaced(6))
         bar.addView(setBtn, spaced(6))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -849,6 +899,7 @@ class MainActivity : AppCompatActivity() {
             t.onOvlClear = { overlayClear(i) }
             t.onOvlOpacity = { pct -> prefs.edit().putInt("ovlop$i", pct).apply() }
             t.onRec = { cams[i]?.toggleRec() }
+            t.onRecChange = { r -> onRecChange(i, r) }
             t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
             t.setOnClickListener {
@@ -889,8 +940,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(stage, sp)
 
         setContentView(root)
+        applyTally()
         refreshStatus()
-        addLog("Doppia 0.9: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 1.0: live, REC, esposizione, segni e take per Premiere, tally grande.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -1198,29 +1250,157 @@ class MainActivity : AppCompatActivity() {
 
     private fun tc(sec: Int): String = String.format(Locale.ROOT, "%02d:%02d:%02d", sec / 3600, (sec / 60) % 60, sec % 60)
 
-    private fun saveMarks() {
-        prefs.edit().putString("marks", marks.joinToString("\n")).apply()
-    }
-
-    /** Segna un momento: ora del tablet e tempo di REC di ogni camera che sta registrando. */
-    private fun markMoment() {
-        val sb = StringBuilder(clock.format(Date()))
-        var any = false
-        for (i in 0..1) {
-            val sec = tiles[i].recSeconds()
-            if (sec < 0) continue
-            sb.append(if (any) "  ·  " else "   ").append(camName(i)).append(' ').append(tc(sec))
-            any = true
+    private fun onRecChange(i: Int, r: Boolean) {
+        val lag = prefs.getInt("reclag", 300)
+        val now = System.currentTimeMillis()
+        if (r) {
+            val t = Session.startTake(i, now - lag)
+            addLog("${camName(i)}: take ${t.num} avviato")
+        } else {
+            val t = Session.openTake(i)
+            Session.closeTake(i, now)
+            if (t != null) addLog("${camName(i)}: take ${t.num} chiuso")
         }
-        if (!any) sb.append("   (nessuna camera in REC)")
-        marks.add(sb.toString())
-        while (marks.size > 500) marks.removeAt(0)
-        saveMarks()
-        addLog("Momento segnato: $sb")
-        Toast.makeText(this, "⚑ Segnato $sb", Toast.LENGTH_SHORT).show()
+        Session.save(prefs)
+        applyTally()
     }
 
-    private fun marksText(): String = marks.joinToString("\n")
+    /** Tally grande: con almeno una camera in REC tutto il bordo dell'app diventa rosso. */
+    private fun applyTally() {
+        val big = prefs.getBoolean("tally", true)
+        for (t in tiles) t.setBigTally(big)
+        val any = tiles.any { it.recording }
+        rootView.setBackgroundColor(if (any && big) 0xFFC62828.toInt() else Pal.BG)
+    }
+
+    /** Segna un momento sul take in corso di ogni camera che registra (tempo dall'inizio del take). */
+    private fun addMark(cat: Int, note: String) {
+        val lag = prefs.getInt("reclag", 300)
+        val refs = ArrayList<Ref>()
+        val sb = StringBuilder(MarkCat.names[cat])
+        if (note.isNotEmpty()) sb.append(": ").append(note)
+        for (i in 0..1) {
+            val ms = tiles[i].recElapsedMs()
+            val tk = Session.openTake(i)
+            if (ms < 0L || tk == null) continue
+            val off = ms + lag
+            refs.add(Ref(i, tk.num, off))
+            sb.append("   ").append(camName(i)).append(' ').append(tc((off / 1000L).toInt()))
+        }
+        if (refs.isEmpty()) sb.append("   (nessuna camera in REC)")
+        Session.addMark(Mark(System.currentTimeMillis(), cat, note, refs))
+        Session.save(prefs)
+        addLog("Segno: $sb")
+        Toast.makeText(this, "⚑ $sb", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Nota: frasi rapide a un tocco oppure testo libero (anche con il microfono della tastiera). */
+    private fun noteDialog() {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(22), dp(18), dp(22), dp(18))
+        val head = TextView(this)
+        head.text = "Nota"
+        head.setTextColor(Pal.TEXT)
+        head.textSize = 20f
+        head.typeface = Typeface.DEFAULT_BOLD
+        col.addView(head)
+
+        val dlg = Dialog(this)
+        fun done(text: String) {
+            dlg.dismiss()
+            addMark(MarkCat.NOTE, text.trim())
+        }
+
+        val chips = LinearLayout(this)
+        chips.orientation = LinearLayout.HORIZONTAL
+        for (q in listOf("Audio sporco", "Fuori fuoco", "Rifare", "Taglio qui", "Ottima")) {
+            val c = TextView(this)
+            c.text = q
+            c.setTextColor(Pal.TEXT)
+            c.textSize = 15f
+            c.typeface = Typeface.DEFAULT_BOLD
+            c.setPadding(dp(14), dp(9), dp(14), dp(9))
+            c.background = roundBg(Pal.LINE, 16, this)
+            c.setOnClickListener { done(q) }
+            chips.addView(c, spaced(8))
+        }
+        val hs = HorizontalScrollView(this)
+        hs.isHorizontalScrollBarEnabled = false
+        hs.addView(chips)
+        val hlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        hlp.topMargin = dp(12)
+        col.addView(hs, hlp)
+
+        val input = EditText(this)
+        input.hint = "Scrivi o detta una nota"
+        input.setTextColor(Pal.TEXT)
+        input.setHintTextColor(Pal.MUTED)
+        input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        input.imeOptions = EditorInfo.IME_ACTION_DONE
+        input.setSingleLine(true)
+        input.setOnEditorActionListener { _, _, _ -> done(input.text.toString()); true }
+        val ilp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        ilp.topMargin = dp(14)
+        col.addView(input, ilp)
+
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.END
+        val cancel = pillButton("Annulla")
+        cancel.setOnClickListener { dlg.dismiss() }
+        val ok = pillButton("Segna")
+        ok.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
+        ok.setTextColor(Pal.BG)
+        ok.setOnClickListener { done(input.text.toString()) }
+        row.addView(cancel)
+        row.addView(ok, spaced(8))
+        val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        rlp.topMargin = dp(16)
+        col.addView(row, rlp)
+
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dlg.setContentView(col)
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dlg.show()
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.55f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
+    private fun camNames(): List<String> = listOf(camName(0), camName(1))
+
+    /** Scrive XML (Premiere), JSON (plugin) e CSV (take list) e apre il menu di condivisione. */
+    private fun exportSession() {
+        if (Session.takes.isEmpty()) {
+            Toast.makeText(this, "Nessun take da esportare: registra prima con REC", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val names = camNames()
+            val fi = prefs.getInt("xmlfps", 2)
+            val dir = File(filesDir, "export")
+            dir.deleteRecursively()
+            dir.mkdirs()
+            val base = "Doppia_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.ROOT).format(Date())
+            val xml = File(dir, "$base.xml")
+            xml.writeText(Session.xmeml(names, fi, base), Charsets.UTF_8)
+            val json = File(dir, "$base.json")
+            json.writeText(Session.json(names, fi), Charsets.UTF_8)
+            val csv = File(dir, "$base.csv")
+            csv.writeText(Session.csv(names), Charsets.UTF_8)
+            val uris = ArrayList<Uri>()
+            for (f in listOf(xml, json, csv)) uris.add(FileProvider.getUriForFile(this, "$packageName.fileprovider", f))
+            val it2 = Intent(Intent.ACTION_SEND_MULTIPLE)
+            it2.type = "*/*"
+            it2.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            it2.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(it2, "Esporta per Premiere"))
+            addLog("Esportati $base .xml .json .csv")
+        } catch (e: Throwable) {
+            addLog("Esportazione: ${e.message ?: e.javaClass.simpleName}")
+            Toast.makeText(this, "Esportazione non riuscita", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun camName(i: Int): String {
         val n = (prefs.getString("name$i", "") ?: "").trim()
@@ -1306,48 +1486,68 @@ class MainActivity : AppCompatActivity() {
         fillParams(params)
         settingsSig = paramSig()
 
-        val markTitle = sectionTitle("Momenti segnati (${marks.size})")
+        val markTitle = sectionTitle("Take e segni")
         col.addView(markTitle)
         val markText = TextView(this)
         markText.setTextColor(Pal.TEXT)
         markText.textSize = 12.5f
         markText.typeface = Typeface.MONOSPACE
-        markText.text = if (marks.isEmpty()) "Nessun momento. Tocca ⚑ Segna in alto durante le riprese." else marksText()
+        fun paintSummary() {
+            val sm = Session.summary(camNames())
+            markText.text = if (sm.isEmpty()) "Nessun take. Registra con REC e usa ⚑ Buona, Scarto, Nota in alto." else sm
+        }
+        paintSummary()
         col.addView(markText)
+
+        val fpsBtn = pillButton("")
+        fun paintFps() { fpsBtn.text = "Fotogrammi dell'XML: " + Session.fpsNames[prefs.getInt("xmlfps", 2).coerceIn(0, Session.fpsNames.size - 1)] + "  ▸" }
+        paintFps()
+        fpsBtn.setOnClickListener {
+            val n = (prefs.getInt("xmlfps", 2) + 1) % Session.fpsNames.size
+            prefs.edit().putInt("xmlfps", n).apply()
+            paintFps()
+        }
+        val flp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        flp.topMargin = dp(8)
+        col.addView(fpsBtn, flp)
+        val lags = listOf(0, 300, 600)
+        col.addView(chooserRow("Ritardo rilevamento REC (ms)", lags.map { it.toString() }, lags.indexOf(prefs.getInt("reclag", 300)).coerceAtLeast(0)) {
+            prefs.edit().putInt("reclag", lags[it]).apply()
+        })
+        col.addView(toggleRow("Tally grande (bordo rosso su tutto lo schermo in REC)", prefs.getBoolean("tally", true)) {
+            prefs.edit().putBoolean("tally", it).apply()
+            applyTally()
+        })
+
         val mrow = LinearLayout(this)
         mrow.orientation = LinearLayout.HORIZONTAL
-        val mcopy = pillButton("Copia")
+        val mexp = pillButton("Esporta per Premiere")
+        mexp.backgroundTintList = ColorStateList.valueOf(Pal.MID)
+        mexp.setTextColor(Pal.BG)
+        mexp.setOnClickListener { exportSession() }
+        val mcopy = pillButton("Copia elenco")
         mcopy.setOnClickListener {
-            if (marks.isEmpty()) return@setOnClickListener
+            val sm = Session.summary(camNames())
+            if (sm.isEmpty()) return@setOnClickListener
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("Momenti segnati", marksText()))
+            cm.setPrimaryClip(ClipData.newPlainText("Take e segni", sm))
             Toast.makeText(this, "Elenco copiato", Toast.LENGTH_SHORT).show()
         }
-        val mshare = pillButton("Condividi")
-        mshare.setOnClickListener {
-            if (marks.isEmpty()) return@setOnClickListener
-            val it2 = Intent(Intent.ACTION_SEND)
-            it2.type = "text/plain"
-            it2.putExtra(Intent.EXTRA_SUBJECT, "Momenti segnati - Doppia")
-            it2.putExtra(Intent.EXTRA_TEXT, marksText())
-            startActivity(Intent.createChooser(it2, "Condividi elenco"))
-        }
-        val mclear = pillButton("Svuota")
+        val mclear = pillButton("Azzera sessione")
         mclear.setOnClickListener {
-            if (marks.isEmpty()) return@setOnClickListener
+            if (Session.takes.isEmpty() && Session.marks.isEmpty()) return@setOnClickListener
             AlertDialog.Builder(this)
-                .setMessage("Cancellare tutti i momenti segnati?")
+                .setMessage("Cancellare tutti i take e i segni?")
                 .setPositiveButton("Cancella") { _, _ ->
-                    marks.clear()
-                    saveMarks()
-                    markTitle.text = "MOMENTI SEGNATI (0)"
-                    markText.text = "Nessun momento. Tocca ⚑ Segna in alto durante le riprese."
+                    Session.reset()
+                    Session.save(prefs)
+                    paintSummary()
                 }
                 .setNegativeButton("Annulla", null)
                 .show()
         }
-        mrow.addView(mcopy)
-        mrow.addView(mshare, spaced(6))
+        mrow.addView(mexp)
+        mrow.addView(mcopy, spaced(6))
         mrow.addView(mclear, spaced(6))
         val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mlp.topMargin = dp(8)

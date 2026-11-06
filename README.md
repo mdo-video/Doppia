@@ -1,4 +1,4 @@
-# Doppia 0.9 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 1.0 (live view, REC, esposizione, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,9 +51,20 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
+## Novita' 1.0
+- **Segni**: tre pulsanti in alto, **⚑ Buona** (verde), **⚑ Scarto** (rosso) e **⚑ Nota** (giallo). Il segno si aggancia al take in corso di ogni camera che registra, con il tempo dall'inizio del take. **Nota** apre frasi rapide (Audio sporco, Fuori fuoco, Rifare, Taglio qui, Ottima) e un campo di testo, dove si puo' dettare con il microfono della tastiera.
+- **Take list**: ogni REC diventa un take per camera (numero, ora di inizio, durata, segni). L'elenco e' in Impostazioni > Take e segni e resta salvato fino ad **Azzera sessione**.
+- **Esporta per Premiere** (Impostazioni > Take e segni): condivide tre file.
+  - `.xml` (Final Cut Pro 7 / xmeml): in Premiere File > Importa. Una sequenza per take, con i segni come marker di sequenza (nome = tipo e nota). Trascina la clip della camera nella sequenza, partendo dall'inizio: i marker cadono sul punto giusto.
+  - `.json`: take e segni con tempi in ms e in fotogrammi, per il plugin UXP.
+  - `.csv`: elenco take (separatore ;, si apre in Excel).
+- **Fotogrammi dell'XML** (tocca per cambiare, di partenza 25) e **Ritardo rilevamento REC** (di partenza 300 ms): l'app vede il REC fino a 0,6 s dopo la camera, il ritardo viene aggiunto ai tempi dei segni.
+- **Tally grande**: con una camera in REC tutto il bordo dell'app diventa rosso, cornice spessa e pillola REC piu' grande (si spegne in Impostazioni).
+- **Avviso batteria**: sotto il nome della camera compare il livello quando e' sotto il 25%. Il codice della proprieta' Sony e' da verificare nel log.
+
 ## Novita' 0.9
 - **Screenshot** per ogni camera: pulsante tondo a destra del riquadro. Salva il fotogramma pulito (senza zebra e strumenti) in Immagini/Doppia e il pulsante diventa **Condividi**, che apre il menu di condivisione (WhatsApp ecc.).
 - **Sovrapposizione**: pulsante a livelli sotto lo screenshot. Metti un'immagine (ultimo screenshot della camera oppure dalla Galleria) sopra il live per rifare la stessa inquadratura di un'altra giornata. Cursore di opacita' (50% di partenza); l'immagine resta salvata per ogni camera.
 
 ## Da fare dopo la prova
-REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.
+REC/STOP, layout sovrapposto, camera non Sony come flusso di rete, capienza scheda residua.

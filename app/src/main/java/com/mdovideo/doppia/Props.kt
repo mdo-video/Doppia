@@ -27,6 +27,27 @@ object SonyProps {
     const val WB = 0x5005
     const val EXP_MODE = 0x500E     // 1 M, 2 P, 3 A, 4 S
     const val METERING = 0x500B
+    const val BATTERY_STD = 0x5001  // livello batteria standard PTP (0-100)
+    const val BATTERY = 0xD20E      // livello batteria Sony (da verificare nel log)
+
+    /** Livello batteria in percentuale approssimata, oppure null se la camera non lo espone in modo riconoscibile. */
+    fun batteryPercent(m: Map<Int, Prop>): Int? {
+        val std = m[BATTERY_STD]
+        if (std != null && std.current in 0L..100L) return std.current.toInt()
+        val son = m[BATTERY] ?: return null
+        return when (son.current.toInt()) {
+            0 -> 0
+            1 -> 5
+            2 -> 25
+            3 -> 50
+            4 -> 75
+            5 -> 100
+            6 -> 33
+            7 -> 66
+            8 -> 100
+            else -> null
+        }
+    }
 
     fun typeSize(t: Int): Int = when (t) {
         1, 2 -> 1; 3, 4 -> 2; 5, 6 -> 4; 7, 8 -> 8; 9, 10 -> 16; else -> -1
