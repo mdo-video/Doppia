@@ -16,11 +16,41 @@ class SonyCam(
     private val tag: String,
     private val log: (String) -> Unit,
     private val onState: (CamState) -> Unit,
-    private val onFrame: (Bitmap, Int) -> Unit
+    private val onFrame: (Bitmap, Int) -> Unit,
+    private val onProps: (Map<Int, Prop>) -> Unit = {}
 ) {
     @Volatile private var running = false
     private var thread: Thread? = null
     private var client: PtpIpClient? = null
+
+    private val cmds = java.util.concurrent.LinkedBlockingQueue<(PtpIpClient) -> Unit>()
+    @Volatile private var pollNow = false
+    @Volatile private var lastMap: Map<Int, Prop> = emptyMap()
+    @Volatile private var diffBase: Map<Int, Prop>? = null
+    @Volatile private var diffLeft = 0
+
+    /** Imposta ISO / otturatore / diaframma con SDIO_SetExtDevicePropValue (0x9205). */
+    fun setProp(p: Prop, value: Long) {
+        cmds.add { c ->
+            val r = c.transaction(0x9205, intArrayOf(p.code), SonyProps.toBytes(value, SonyProps.typeSize(p.type)))
+            say("Imposta ${hex(p.code)} = ${SonyProps.fmt(p.code, value)} (0x${value.toString(16)}): ${hex(r.code)}")
+            pollNow = true
+        }
+    }
+
+    /** Preme e rilascia il pulsante REC (SDIO_ControlDevice 0x9207, proprieta' 0xD2C8). */
+    fun toggleRec() {
+        cmds.add { c ->
+            diffBase = lastMap
+            diffLeft = 4
+            val d = c.transaction(0x9207, intArrayOf(SonyProps.REC_BUTTON), SonyProps.toBytes(2, 2))
+            say("REC giu': ${hex(d.code)}")
+            Thread.sleep(120)
+            val u = c.transaction(0x9207, intArrayOf(SonyProps.REC_BUTTON), SonyProps.toBytes(1, 2))
+            say("REC su: ${hex(u.code)}")
+            pollNow = true
+        }
+    }
 
     fun start() {
         if (running) return
@@ -33,6 +63,7 @@ class SonyCam(
 
     fun stop() {
         running = false
+        cmds.clear()
         try { client?.close() } catch (_: Throwable) {}
         thread?.interrupt()
         thread = null
@@ -121,6 +152,7 @@ class SonyCam(
                 // Massimo 30 fps: non chiedere due fotogrammi a meno di 33 ms.
                 val gap = 33_000_000L - (System.nanoTime() - lastStart)
                 if (gap > 0) Thread.sleep(gap / 1_000_000L, (gap % 1_000_000L).toInt())
+                while (true) { val cmd = cmds.poll() ?: break; cmd(c) }
                 val t0 = System.nanoTime()
                 lastStart = t0
                 val r = c.transaction(0x1009, intArrayOf(0xFFFFC002.toInt()))
@@ -155,10 +187,12 @@ class SonyCam(
                 onState(CamState.LIVE)
                 onFrame(bmp, ms)
 
-                // La guida chiede di rileggere la tabella proprieta' a intervalli regolari (tiene viva la sessione).
-                if (System.nanoTime() - lastPoll > 2_000_000_000L) {
-                    c.transaction(0x9209, intArrayOf(1, 0))
+                // Rilettura della tabella proprieta' (tiene viva la sessione e aggiorna REC/ISO/otturatore/diaframma).
+                if (pollNow || System.nanoTime() - lastPoll > 600_000_000L) {
+                    pollNow = false
+                    val t = c.transaction(0x9209, intArrayOf(0, 0))
                     lastPoll = System.nanoTime()
+                    if (t.ok) handleProps(t.data)
                 }
             }
         } catch (e: InterruptedException) {
@@ -173,6 +207,39 @@ class SonyCam(
             try { client?.close() } catch (_: Throwable) {}
             client = null
         }
+    }
+
+    private var propsLogged = false
+
+    private fun handleProps(data: ByteArray) {
+        val r = SonyProps.parse(data)
+        val m = r.props
+        if (m.isEmpty()) return
+        if (!propsLogged) {
+            propsLogged = true
+            say("Tabella proprieta': ${m.size} voci${if (r.complete) "" else " (lettura parziale)"}")
+            say("Valori: " + m.values.joinToString(" ") { "${hex(it.code)}=${it.current.toString(16)}" })
+            for (code in intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE)) {
+                val p = m[code]
+                if (p == null) say("${hex(code)}: assente nella tabella")
+                else say("${hex(code)}: ${SonyProps.fmt(code, p.current)}, modificabile=${p.settable}, ${p.options.size} valori ammessi")
+            }
+        }
+        // Dopo REC: mostra quali proprieta' sono cambiate, per controllare il codice dello stato di registrazione.
+        val base = diffBase
+        if (base != null && diffLeft > 0) {
+            diffLeft--
+            val ch = m.values.filter { base[it.code]?.current != it.current }
+            if (ch.isNotEmpty()) {
+                say("Cambiate dopo REC: " + ch.joinToString(" ") { "${hex(it.code)} ${base[it.code]?.current?.toString(16) ?: "-"}>${it.current.toString(16)}" })
+                diffBase = null
+            } else if (diffLeft == 0) {
+                say("Dopo REC nessuna proprieta' e' cambiata")
+                diffBase = null
+            }
+        }
+        lastMap = m
+        onProps(m)
     }
 
     /** LiveView Dataset: offset+dimensione del JPEG nei primi 8 byte; se non tornano, cerca FF D8 ... FF D9. */
