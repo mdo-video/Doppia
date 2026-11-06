@@ -113,9 +113,9 @@ class PtpIpClient(
     }
 
     @Synchronized
-    fun transaction(op: Int, params: IntArray = IntArray(0)): Result {
+    fun transaction(op: Int, params: IntArray = IntArray(0), dataOut: ByteArray? = null): Result {
         val id = txId++
-        return run(id, op, params, null)
+        return run(id, op, params, dataOut)
     }
 
     private fun run(id: Int, op: Int, params: IntArray, dataOut: ByteArray?): Result {
@@ -126,6 +126,15 @@ class PtpIpClient(
         req.putInt(phase).putShort(op.toShort()).putInt(id)
         for (p in params) req.putInt(p)
         send(output, T_OP_REQ, req.array())
+        if (dataOut != null) {
+            // Fase dati (iniziatore -> camera): StartData con la lunghezza totale, poi EndData con i byte.
+            val sd = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN)
+            sd.putInt(id).putLong(dataOut.size.toLong())
+            send(output, T_START_DATA, sd.array())
+            val ed = ByteBuffer.allocate(4 + dataOut.size).order(ByteOrder.LITTLE_ENDIAN)
+            ed.putInt(id).put(dataOut)
+            send(output, T_END_DATA, ed.array())
+        }
 
         val data = ByteArrayOutputStream(64 * 1024)
         while (true) {

@@ -1,4 +1,4 @@
-# Doppia 0.1 (prova di collegamento)
+# Doppia 0.2 (live view secondo la guida Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
