@@ -1,0 +1,43 @@
+name: Estrai e compila
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Estrai zip
+        run: |
+          z=$(ls *.zip 2>/dev/null | head -n 1 || true)
+          if [ -n "$z" ]; then
+            rm -rf /tmp/x && mkdir /tmp/x && unzip -q "$z" -d /tmp/x
+            src=/tmp/x/Doppia
+            [ -d "$src" ] || src=/tmp/x
+            rsync -a --exclude '.github' "$src"/ ./
+            git rm -q -f "$z"
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add -A
+            git commit -q -m "Estrai $z"
+            git push
+          fi
+      - uses: actions/setup-java@v4
+        if: hashFiles('settings.gradle.kts') != ''
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        if: hashFiles('settings.gradle.kts') != ''
+        with:
+          gradle-version: 8.9
+      - name: Compila
+        if: hashFiles('settings.gradle.kts') != ''
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('settings.gradle.kts') != ''
+        with:
+          name: Doppia-APK
+          path: app/build/outputs/apk/debug/*.apk
