@@ -1,4 +1,4 @@
-# Doppia 0.5 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 0.6 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -36,6 +36,11 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Impostazioni > Camere**: nome e indirizzo IP di ogni camera, tasto Scollega.
 - **Connetti / Riprova / Annulla** al centro del riquadro, sopra il messaggio di stato; sparisce con la camera live.
 - **Log** spostato in Impostazioni (Diagnostica > Apri il log).
+
+## Novita' 0.6
+- **Collegamento automatico** all'avvio per le camere con IP salvato (si spegne in Impostazioni > Camere).
+- **REC A+B** grigio finche' nessuna camera e' live.
+- **Puntino di stato** accanto al nome nel riquadro: grigio spenta, giallo in collegamento, verde live, rosso errore.
 
 ## Da fare dopo la prova
 REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.

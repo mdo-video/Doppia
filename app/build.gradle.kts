@@ -15,7 +15,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1 + runNumber
-        versionName = "0.5.$runNumber"
+        versionName = "0.6.$runNumber"
     }
 
     // Chiave di firma fissa: stessa firma a ogni build, gli aggiornamenti si installano sopra.

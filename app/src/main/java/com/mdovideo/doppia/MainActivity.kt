@@ -186,6 +186,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private var props: Map<Int, Prop> = emptyMap()
     private var pickerCode = 0
     private var recStart = 0L
+    private var labelText = label
+    private var camState = CamState.IDLE
     private var evSmooth = 0f
     private val borderRed = GradientDrawable().apply {
         setColor(0)
@@ -264,7 +266,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         tag.typeface = Typeface.DEFAULT_BOLD
         tag.setPadding(dp(10), dp(5), dp(10), dp(5))
         tag.background = roundBg(0xCC0B0F15.toInt(), 12, ctx)
-        tag.text = label
+        updateTag()
         val tp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         tp.gravity = Gravity.TOP or Gravity.START
         tp.setMargins(dp(12), dp(12), 0, 0)
@@ -398,7 +400,21 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     }
 
     fun setLabel(text: String) {
-        tag.text = text
+        labelText = text
+        updateTag()
+    }
+
+    /** Nome della camera con il puntino dello stato: grigio spenta, giallo in collegamento, verde live, rosso errore. */
+    private fun updateTag() {
+        val c = when (camState) {
+            CamState.IDLE -> Pal.MUTED
+            CamState.CONNECTING, CamState.WAITING -> Pal.MID
+            CamState.LIVE -> Pal.OK
+            CamState.ERROR -> 0xFFE53935.toInt()
+        }
+        val sp = SpannableString("● $labelText")
+        sp.setSpan(ForegroundColorSpan(c), 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        tag.text = sp
     }
 
     /** Cambia solo il messaggio sotto il tasto (es. IP mancante). */
@@ -407,6 +423,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     }
 
     fun setState(st: CamState) {
+        camState = st
+        updateTag()
         when (st) {
             CamState.IDLE -> clear("Nessun segnale", "Connetti")
             CamState.CONNECTING -> clear("Mi collego…", "Annulla")
@@ -520,6 +538,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tiles: Array<Tile>
     private lateinit var status: TextView
     private lateinit var logClose: MaterialButton
+    private lateinit var recAllBtn: MaterialButton
     private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
@@ -561,7 +580,7 @@ class MainActivity : AppCompatActivity() {
         status.background = roundBg(Pal.CARD, 14, this)
         bar.addView(status, spaced(12))
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        val recAllBtn = pillButton("REC A+B")
+        recAllBtn = pillButton("REC A+B")
         recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
         recAllBtn.setOnClickListener { recBoth() }
         val setBtn = pillButton("Impostazioni")
@@ -615,9 +634,15 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.5: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 0.6: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
+        if (prefs.getBoolean("auto", true)) {
+            for (i in 0..1) {
+                val ip = (prefs.getString("ip$i", "") ?: "").trim()
+                if (ip.isNotEmpty() && cams[i] == null) toggle(i)
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -673,6 +698,8 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         val n = liveNow.count { it }
         status.text = if (n == 0) "nessuna camera live" else "$n di 2 live"
+        recAllBtn.isEnabled = n > 0
+        recAllBtn.alpha = if (n > 0) 1f else 0.4f
     }
 
     // ---------- Impostazioni ----------
@@ -694,6 +721,10 @@ class MainActivity : AppCompatActivity() {
 
         col.addView(sectionTitle("Camere"))
         for (i in 0..1) col.addView(cameraRow(i))
+
+        col.addView(toggleRow("Collega all'avvio le camere con IP salvato", prefs.getBoolean("auto", true)) {
+            prefs.edit().putBoolean("auto", it).apply()
+        })
 
         col.addView(sectionTitle("Monitor"))
         col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
