@@ -1,4 +1,4 @@
-# Doppia 0.4 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
+# Doppia 0.5 (live view, REC, esposizione e strumenti monitor, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -9,8 +9,8 @@ Non e' ancora provata su una camera vera: il log serve proprio a correggere il t
 ## Come provare
 1. Accendi l'hotspot del tablet (o usa un router) e collega le due camere a quella rete dal menu Rete / Wi-Fi.
 2. Sulle camere attiva il controllo da smartphone (i nomi dei menu cambiano da modello a modello).
-3. Apri Doppia, tocca **Cerca camere**: i due indirizzi si riempiono da soli. Altrimenti scrivili a mano.
-4. Tocca **Connetti** su A e su B. Tocca **Log** per vedere cosa succede.
+3. Apri Doppia, vai in **Impostazioni > Camere**: scrivi il nome e l'indirizzo IP di ogni camera.
+4. Tocca **Connetti** al centro di ogni riquadro. Il **Log** si apre da Impostazioni.
 5. Tocca un riquadro per metterlo a tutto schermo, di nuovo per tornare ai due.
 
 Il numero accanto al nome e' il tempo di un fotogramma (colore dal freddo al caldo).
@@ -29,6 +29,13 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - REC verificato: prova piu' metodi finche' lo stato REC letto dalla camera cambia davvero (bordo rosso + tempo).
 - Tabella proprieta' letta anche con stringhe e array (prima si fermava e il diaframma spariva); diaframma anche via 0x9203.
 - "Copia log e proprieta' delle camere" in Impostazioni: copia tutto negli appunti.
+
+## Novita' 0.5
+- Barra in alto ridotta: titolo, indicatore camere a sinistra; REC A+B e Impostazioni a destra.
+- Tolti **Cerca camere** (non funzionava) e la riga con gli IP in basso.
+- **Impostazioni > Camere**: nome e indirizzo IP di ogni camera, tasto Scollega.
+- **Connetti / Riprova / Annulla** al centro del riquadro, sopra il messaggio di stato; sparisce con la camera live.
+- **Log** spostato in Impostazioni (Diagnostica > Apri il log).
 
 ## Da fare dopo la prova
 REC/STOP, layout sovrapposto, "Segna momento", camera non Sony come flusso di rete.

@@ -7,10 +7,6 @@ import android.view.View
 import androidx.core.graphics.ColorUtils
 import java.net.Inet4Address
 import java.net.NetworkInterface
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 /** Stessa palette di Vicino: dal freddo al caldo. */
 object Pal {
@@ -73,35 +69,4 @@ fun localIpv4(): List<String> {
     } catch (_: Throwable) {
     }
     return out
-}
-
-/** Cerca sulla rete locale i dispositivi con la porta PTP/IP (15740) aperta. */
-fun scanPtpHosts(onProgress: (String) -> Unit): List<String> {
-    val found = java.util.Collections.synchronizedList(ArrayList<String>())
-    val mine = localIpv4()
-    if (mine.isEmpty()) {
-        onProgress("Nessuna rete Wi-Fi o hotspot attivo sul tablet")
-        return found
-    }
-    val pool = Executors.newFixedThreadPool(48)
-    for (ip in mine) {
-        val base = ip.substringBeforeLast('.')
-        onProgress("Cerco su $base.0/24")
-        for (n in 1..254) {
-            val host = "$base.$n"
-            if (host == ip) continue
-            pool.execute {
-                try {
-                    Socket().use { s ->
-                        s.connect(InetSocketAddress(host, 15740), 400)
-                        found.add(host)
-                    }
-                } catch (_: Throwable) {
-                }
-            }
-        }
-    }
-    pool.shutdown()
-    pool.awaitTermination(30, TimeUnit.SECONDS)
-    return found.sortedBy { h -> h.substringAfterLast('.').toIntOrNull() ?: 0 }
 }

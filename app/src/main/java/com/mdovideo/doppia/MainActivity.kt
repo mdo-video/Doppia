@@ -14,7 +14,9 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.SystemClock
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.method.DigitsKeyListener
@@ -166,6 +168,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val tag = TextView(ctx)
     private val lag = TextView(ctx)
     private val empty = TextView(ctx)
+    private val msgBox = LinearLayout(ctx)
+    private val connectBtn = MaterialButton(ctx)
 
     private val recPill = TextView(ctx)
     private val recBtn = RecButton(ctx)
@@ -193,6 +197,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     var recording = false
         private set
     var onRec: (() -> Unit)? = null
+    var onConnect: (() -> Unit)? = null
     var onPick: ((Prop, Long) -> Unit)? = null
 
     private val ticker = object : Runnable {
@@ -230,11 +235,29 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         gridV.visibility = View.GONE
         addView(gridV, full())
 
+        // Al centro: tasto Connetti / Riprova / Annulla e, sotto, il messaggio di stato
+        msgBox.orientation = LinearLayout.VERTICAL
+        msgBox.gravity = Gravity.CENTER
+        connectBtn.isAllCaps = false
+        connectBtn.textSize = 16f
+        connectBtn.setTextColor(Pal.BG)
+        connectBtn.backgroundTintList = ColorStateList.valueOf(accent)
+        connectBtn.cornerRadius = dp(26)
+        connectBtn.insetTop = 0
+        connectBtn.insetBottom = 0
+        connectBtn.minimumWidth = dp(160)
+        connectBtn.minimumHeight = dp(52)
+        connectBtn.text = "Connetti"
+        connectBtn.setOnClickListener { onConnect?.invoke() }
+        Springs.pressable(connectBtn)
+        msgBox.addView(connectBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         empty.setTextColor(Pal.MUTED)
         empty.textSize = 15f
         empty.gravity = Gravity.CENTER
         empty.text = "Nessun segnale"
-        addView(empty, full())
+        empty.setPadding(dp(24), dp(14), dp(24), 0)
+        msgBox.addView(empty, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(msgBox, full())
 
         tag.setTextColor(Pal.TEXT)
         tag.textSize = 13f
@@ -345,7 +368,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
     fun setFrame(b: Bitmap, ms: Int, a: Analysis?) {
         img.setImageBitmap(b)
-        empty.visibility = View.GONE
+        msgBox.visibility = View.GONE
         lag.visibility = View.VISIBLE
         val s = SpannableString("● $ms ms")
         s.setSpan(ForegroundColorSpan(lagColor(ms)), 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -374,12 +397,21 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
+    fun setLabel(text: String) {
+        tag.text = text
+    }
+
+    /** Cambia solo il messaggio sotto il tasto (es. IP mancante). */
+    fun showMessage(text: String) {
+        empty.text = text
+    }
+
     fun setState(st: CamState) {
         when (st) {
-            CamState.IDLE -> clear("Nessun segnale")
-            CamState.CONNECTING -> clear("Mi collego…")
-            CamState.WAITING -> clear("In attesa del live view…")
-            CamState.ERROR -> clear("Collegamento non riuscito, guarda il log")
+            CamState.IDLE -> clear("Nessun segnale", "Connetti")
+            CamState.CONNECTING -> clear("Mi collego…", "Annulla")
+            CamState.WAITING -> clear("In attesa del live view…", "Annulla")
+            CamState.ERROR -> clear("Collegamento non riuscito\n(il log è in Impostazioni)", "Riprova")
             CamState.LIVE -> {}
         }
     }
@@ -459,7 +491,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
-    private fun clear(text: String) {
+    private fun clear(text: String, btn: String) {
         img.setImageDrawable(null)
         zebraImg.visibility = View.GONE
         peakImg.visibility = View.GONE
@@ -468,7 +500,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         meterBox.visibility = View.GONE
         lag.visibility = View.GONE
         empty.text = text
-        empty.visibility = View.VISIBLE
+        connectBtn.text = btn
+        msgBox.visibility = View.VISIBLE
         closePicker()
         bar.visibility = View.GONE
         recPill.visibility = View.GONE
@@ -485,9 +518,9 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("doppia", MODE_PRIVATE) }
     private val cams = arrayOfNulls<SonyCam>(2)
     private lateinit var tiles: Array<Tile>
-    private lateinit var fields: Array<EditText>
-    private lateinit var buttons: Array<MaterialButton>
     private lateinit var status: TextView
+    private lateinit var logClose: MaterialButton
+    private val stopBtns = arrayOfNulls<MaterialButton>(2)
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
     private val liveNow = BooleanArray(2)
@@ -510,7 +543,7 @@ class MainActivity : AppCompatActivity() {
         root.fitsSystemWindows = true
         root.setPadding(dp(14), dp(10), dp(14), dp(12))
 
-        // Barra in alto
+        // Barra in alto: titolo + indicatore camere a sinistra, REC A+B e Impostazioni a destra
         val bar = LinearLayout(this)
         bar.orientation = LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
@@ -519,38 +552,32 @@ class MainActivity : AppCompatActivity() {
         title.setTextColor(Pal.TEXT)
         title.textSize = 22f
         title.typeface = Typeface.DEFAULT_BOLD
-        bar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         status = TextView(this)
         status.setTextColor(Pal.MUTED)
         status.textSize = 12f
         status.typeface = Typeface.MONOSPACE
         status.setPadding(dp(12), dp(5), dp(12), dp(5))
         status.background = roundBg(Pal.CARD, 14, this)
-        bar.addView(status)
+        bar.addView(status, spaced(12))
+        bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         val recAllBtn = pillButton("REC A+B")
         recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
         recAllBtn.setOnClickListener { recBoth() }
         val setBtn = pillButton("Impostazioni")
         setBtn.setOnClickListener { showSettings() }
-        val scanBtn = pillButton("Cerca camere")
-        scanBtn.setOnClickListener { scan() }
-        val logBtn = pillButton("Log")
-        logBtn.setOnClickListener {
-            logScroll.visibility = if (logScroll.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }
         bar.addView(recAllBtn, spaced(10))
         bar.addView(setBtn, spaced(6))
-        bar.addView(scanBtn, spaced(6))
-        bar.addView(logBtn, spaced(6))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Area dei due riquadri, con il log sopra
         val stage = FrameLayout(this)
         tilesRow = LinearLayout(this)
         tilesRow.orientation = LinearLayout.HORIZONTAL
-        tiles = arrayOf(Tile(this, "Camera A", Pal.COLD), Tile(this, "Camera B", Pal.HOT))
+        tiles = arrayOf(Tile(this, camName(0), Pal.COLD), Tile(this, camName(1), Pal.HOT))
         for (i in 0..1) {
             val t = tiles[i]
+            t.onConnect = { toggle(i) }
             t.onRec = { cams[i]?.toggleRec() }
             t.onPick = { p, v -> cams[i]?.setProp(p, v) }
             Springs.pressable(t, 0.985f)
@@ -574,61 +601,21 @@ class MainActivity : AppCompatActivity() {
         logScroll.addView(logText)
         logScroll.visibility = View.GONE
         stage.addView(logScroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        logClose = pillButton("Chiudi log")
+        logClose.visibility = View.GONE
+        logClose.setOnClickListener { showLog(false) }
+        val lcp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lcp.gravity = Gravity.TOP or Gravity.END
+        lcp.setMargins(0, dp(10), dp(10), 0)
+        stage.addView(logClose, lcp)
 
         val sp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         sp.topMargin = dp(10)
         root.addView(stage, sp)
 
-        // Righe di collegamento
-        val bottom = LinearLayout(this)
-        bottom.orientation = LinearLayout.HORIZONTAL
-        fields = Array(2) { EditText(this) }
-        buttons = Array(2) { pillButton("Connetti") }
-        for (i in 0..1) {
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = Gravity.CENTER_VERTICAL
-            row.background = rowBg(true, true, Pal.CARD)
-            row.setPadding(dp(10), dp(8), dp(10), dp(8))
-
-            val av = TextView(this)
-            av.text = if (i == 0) "A" else "B"
-            av.gravity = Gravity.CENTER
-            av.setTextColor(Pal.BG)
-            av.typeface = Typeface.DEFAULT_BOLD
-            av.background = roundBg(if (i == 0) Pal.COLD else Pal.HOT, 20, this)
-            row.addView(av, LinearLayout.LayoutParams(dp(40), dp(40)))
-
-            val f = fields[i]
-            f.hint = "indirizzo IP, es. 192.168.43.21"
-            f.setHintTextColor(Pal.MUTED)
-            f.setTextColor(Pal.TEXT)
-            f.textSize = 14f
-            f.typeface = Typeface.MONOSPACE
-            f.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            f.keyListener = DigitsKeyListener.getInstance("0123456789.")
-            f.setSingleLine(true)
-            f.setBackgroundColor(0)
-            f.setPadding(dp(12), dp(8), dp(12), dp(8))
-            f.setText(prefs.getString("ip$i", "") ?: "")
-            val flp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            row.addView(f, flp)
-
-            val b = buttons[i]
-            b.setOnClickListener { toggle(i) }
-            row.addView(b)
-
-            val rlp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            if (i == 1) rlp.leftMargin = dp(10)
-            bottom.addView(row, rlp)
-        }
-        val bp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        bp.topMargin = dp(10)
-        root.addView(bottom, bp)
-
         setContentView(root)
         refreshStatus()
-        addLog("Doppia 0.4: live, REC, esposizione, zebra, peaking, istogramma.")
+        addLog("Doppia 0.5: live, REC, esposizione, zebra, peaking, istogramma.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
     }
@@ -650,6 +637,16 @@ class MainActivity : AppCompatActivity() {
         b.insetBottom = 0
         Springs.pressable(b)
         return b
+    }
+
+    private fun camName(i: Int): String {
+        val n = (prefs.getString("name$i", "") ?: "").trim()
+        return if (n.isEmpty()) (if (i == 0) "Camera A" else "Camera B") else n
+    }
+
+    private fun showLog(on: Boolean) {
+        logScroll.visibility = if (on) View.VISIBLE else View.GONE
+        logClose.visibility = if (on) View.VISIBLE else View.GONE
     }
 
     private fun spaced(left: Int): LinearLayout.LayoutParams {
@@ -695,6 +692,9 @@ class MainActivity : AppCompatActivity() {
         head.typeface = Typeface.DEFAULT_BOLD
         col.addView(head)
 
+        col.addView(sectionTitle("Camere"))
+        for (i in 0..1) col.addView(cameraRow(i))
+
         col.addView(sectionTitle("Monitor"))
         col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
         val zl = listOf(70, 80, 90, 95, 100)
@@ -721,6 +721,10 @@ class MainActivity : AppCompatActivity() {
         val copy = pillButton("Copia log e proprietà delle camere")
         copy.setOnClickListener { copyDiagnostics() }
         col.addView(copy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val logBtn = pillButton("Apri il log")
+        val lbp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lbp.topMargin = dp(8)
+        col.addView(logBtn, lbp)
 
         val close = pillButton("Chiudi")
         val cl = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -732,9 +736,11 @@ class MainActivity : AppCompatActivity() {
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dlg.setContentView(scroll)
         dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
-        dlg.setOnDismissListener { settingsDlg = null; settingsParams = null }
+        dlg.setOnDismissListener { settingsDlg = null; settingsParams = null; stopBtns[0] = null; stopBtns[1] = null }
         close.setOnClickListener { dlg.dismiss() }
+        logBtn.setOnClickListener { dlg.dismiss(); showLog(true) }
         settingsDlg = dlg
+        dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
         dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.6f).toInt(), (resources.displayMetrics.heightPixels * 0.85f).toInt())
     }
@@ -757,7 +763,72 @@ class MainActivity : AppCompatActivity() {
         return sb.toString()
     }
 
+    /** Una camera nelle impostazioni: nome (al posto di A/B), indirizzo IP e tasto Scollega. */
+    private fun cameraRow(i: Int): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.background = rowBg(true, true, Pal.CARD)
+        row.setPadding(dp(10), dp(8), dp(10), dp(8))
+        val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        rlp.bottomMargin = dp(8)
+        row.layoutParams = rlp
+
+        val dot = View(this)
+        dot.background = roundBg(if (i == 0) Pal.COLD else Pal.HOT, 10, this)
+        row.addView(dot, LinearLayout.LayoutParams(dp(20), dp(20)))
+
+        val name = EditText(this)
+        name.hint = if (i == 0) "Camera A" else "Camera B"
+        name.setHintTextColor(Pal.MUTED)
+        name.setTextColor(Pal.TEXT)
+        name.textSize = 15f
+        name.typeface = Typeface.DEFAULT_BOLD
+        name.setSingleLine(true)
+        name.setBackgroundColor(0)
+        name.setPadding(dp(12), dp(8), dp(12), dp(8))
+        name.setText(prefs.getString("name$i", "") ?: "")
+        name.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: Editable?) {
+                prefs.edit().putString("name$i", e?.toString()?.trim() ?: "").apply()
+                tiles[i].setLabel(camName(i))
+            }
+        })
+        row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val ip = EditText(this)
+        ip.hint = "indirizzo IP, es. 192.168.43.21"
+        ip.setHintTextColor(Pal.MUTED)
+        ip.setTextColor(Pal.TEXT)
+        ip.textSize = 14f
+        ip.typeface = Typeface.MONOSPACE
+        ip.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        ip.keyListener = DigitsKeyListener.getInstance("0123456789.")
+        ip.setSingleLine(true)
+        ip.setBackgroundColor(0)
+        ip.setPadding(dp(12), dp(8), dp(12), dp(8))
+        ip.setText(prefs.getString("ip$i", "") ?: "")
+        ip.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: Editable?) {
+                prefs.edit().putString("ip$i", e?.toString()?.trim() ?: "").apply()
+            }
+        })
+        row.addView(ip, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f))
+
+        val stop = pillButton("Scollega")
+        stop.visibility = if (cams[i] != null) View.VISIBLE else View.GONE
+        stop.setOnClickListener { toggle(i) }
+        stopBtns[i] = stop
+        row.addView(stop)
+        return row
+    }
+
     private fun refreshSettings() {
+        for (i in 0..1) stopBtns[i]?.visibility = if (cams[i] != null) View.VISIBLE else View.GONE
         val params = settingsParams ?: return
         val sig = paramSig()
         if (sig == settingsSig) return
@@ -772,7 +843,7 @@ class MainActivity : AppCompatActivity() {
             val cam = cams[i]
             if (cam == null || !liveNow[i]) continue
             any = true
-            container.addView(sectionTitle(if (i == 0) "Camera A" else "Camera B"))
+            container.addView(sectionTitle(camName(i)))
             val m = cam.props
             var rows = 0
             for (code in paramCodes) {
@@ -915,14 +986,14 @@ class MainActivity : AppCompatActivity() {
             cams[i] = null
             return
         }
-        val ip = fields[i].text.toString().trim()
+        val ip = (prefs.getString("ip$i", "") ?: "").trim()
         if (!Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(ip)) {
-            addLog("Camera ${if (i == 0) "A" else "B"}: scrivi un indirizzo IP valido")
+            addLog("${camName(i)}: scrivi un indirizzo IP valido")
+            tiles[i].showMessage("Inserisci l'indirizzo IP in Impostazioni")
             return
         }
-        prefs.edit().putString("ip$i", ip).apply()
         val cam = SonyCam(
-            ip, guid(), if (i == 0) "A" else "B",
+            ip, guid(), camName(i),
             { s -> addLog(s) },
             { st -> runOnUiThread { onState(i, st) } },
             { bmp, ms ->
@@ -938,33 +1009,9 @@ class MainActivity : AppCompatActivity() {
     private fun onState(i: Int, st: CamState) {
         tiles[i].setState(st)
         liveNow[i] = st == CamState.LIVE
-        buttons[i].text = when (st) {
-            CamState.IDLE -> "Connetti"
-            CamState.ERROR -> "Riprova"
-            else -> "Stop"
-        }
         if (st == CamState.ERROR) cams[i] = null
         refreshStatus()
         refreshSettings()
-    }
-
-    private fun scan() {
-        addLog("Cerco camere sulla rete…")
-        Thread {
-            val found = scanPtpHosts { s -> addLog(s) }
-            runOnUiThread {
-                if (found.isEmpty()) {
-                    addLog("Nessuna camera trovata. Controlla che siano accese, con il Wi-Fi attivo e sulla stessa rete del tablet.")
-                } else {
-                    addLog("Trovate: ${found.joinToString(", ")}")
-                    for (h in found) {
-                        if (fields.any { it.text.toString().trim() == h }) continue
-                        val empty = fields.firstOrNull { it.text.toString().trim().isEmpty() } ?: break
-                        empty.setText(h)
-                    }
-                }
-            }
-        }.start()
     }
 
     private fun guid(): ByteArray {
