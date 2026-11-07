@@ -25,10 +25,17 @@ object SonyProps {
     const val REC_BUTTON = 0xD2C8   // pulsante REC: 2 = giu', 1 = su
     const val EXP_COMP = 0x5010     // int16: EV x 1000
     const val WB = 0x5005
+    const val KELVIN = 0xD20F       // uint16: temperatura colore in K (da verificare nel log)
+    const val WB_KELVIN = 0x8012L   // valore di WB "temperatura colore" (da verificare nel log)
     const val EXP_MODE = 0x500E     // 1 M, 2 P, 3 A, 4 S
     const val METERING = 0x500B
     const val BATTERY_STD = 0x5001  // livello batteria standard PTP (0-100)
     const val BATTERY = 0xD20E      // livello batteria Sony (da verificare nel log)
+
+    /** Proprieta' Sony di avviso temperatura/surriscaldamento (da riempire quando il log mostra il codice giusto). */
+    val TEMP_WARN = intArrayOf()
+
+    fun overheat(m: Map<Int, Prop>): Boolean = TEMP_WARN.any { (m[it]?.current ?: 0L) != 0L }
 
     // Memoria residua (codici Sony da verificare nel log: se la camera non li espone si vede "—")
     val MEDIA_TIME = intArrayOf(0xD249, 0xD24B)   // tempo residuo filmato, slot 1 e 2 (secondi)
@@ -38,6 +45,16 @@ object SonyProps {
     fun mediaSeconds(m: Map<Int, Prop>): List<Long?> = MEDIA_TIME.map { c ->
         val v = m[c]?.current
         if (v == null || v < 0 || v > 0xFFFFFL) null else v
+    }
+
+    /** Testo della memoria residua ("1h 12m", con due schede "1: 1h 12m  2: 40m"), oppure null se non leggibile. */
+    fun memSummary(m: Map<Int, Prop>): String? {
+        val mem = mediaSeconds(m)
+        val valid = mem.filterNotNull()
+        if (valid.isEmpty()) return null
+        return mem.mapIndexedNotNull { i, s ->
+            if (s == null) null else (if (mem.size > 1 && valid.size > 1) "${i + 1}: " else "") + fmtRemain(s)
+        }.joinToString("  ")
     }
 
     fun fmtRemain(sec: Long): String {
@@ -163,7 +180,20 @@ object SonyProps {
             val form = d[p].toInt() and 0xff
             p += 1
             when (form) {
-                1 -> p += 3 * sz
+                1 -> {
+                    // intervallo: minimo, massimo, passo -> elenco dei valori (se non e' enorme)
+                    if (p + 3 * sz > d.size) return null
+                    val mn = readVal(bb, p, dt)
+                    val mx = readVal(bb, p + sz, dt)
+                    val st = readVal(bb, p + 2 * sz, dt)
+                    p += 3 * sz
+                    if (st > 0 && mx >= mn && (mx - mn) / st <= 600) {
+                        val list = ArrayList<Long>()
+                        var v = mn
+                        while (v <= mx) { list.add(v); v += st }
+                        setList = list
+                    }
+                }
                 2 -> {
                     for (l in 0 until 2) {
                         if (p + 2 > d.size) return null
@@ -233,10 +263,26 @@ object SonyProps {
             0x8004L -> "Spot standard"; 0x8005L -> "Spot largo"; 0x8006L -> "Alte luci"
             else -> hex(v)
         }
-        WB -> when (v) {
-            2L -> "Auto"; 4L -> "Luce diurna"; 5L -> "Fluorescente"; 6L -> "Incandescenza"; 7L -> "Flash"
-            else -> hex(v)
-        }
+        WB -> fmtWb(v)
+        KELVIN -> "${v}K"
+        else -> hex(v)
+    }
+
+    /** Bilanciamento del bianco, nome lungo (i codici oltre 0x8000 sono da verificare nel log). */
+    fun fmtWb(v: Long): String = when (v) {
+        2L -> "Auto"; 4L -> "Luce diurna"; 5L -> "Fluorescente"; 6L -> "Incandescenza"; 7L -> "Flash"
+        0x8001L -> "Fluo calda"; 0x8002L -> "Fluo fredda"; 0x8003L -> "Fluo bianca"; 0x8004L -> "Fluo diurna"
+        0x8010L -> "Nuvoloso"; 0x8011L -> "Ombra"; WB_KELVIN -> "Temperatura colore"
+        0x8020L -> "Personalizzato 1"; 0x8021L -> "Personalizzato 2"; 0x8022L -> "Personalizzato 3"
+        else -> hex(v)
+    }
+
+    /** Bilanciamento del bianco, nome corto per la barra. */
+    fun fmtWbShort(v: Long): String = when (v) {
+        2L -> "AWB"; 4L -> "DAY"; 5L -> "FLUO"; 6L -> "TUNG"; 7L -> "FLASH"
+        0x8001L, 0x8002L, 0x8003L, 0x8004L -> "FLUO"
+        0x8010L -> "CLOUD"; 0x8011L -> "SHADE"; WB_KELVIN -> "K"
+        0x8020L -> "C1"; 0x8021L -> "C2"; 0x8022L -> "C3"
         else -> hex(v)
     }
 }

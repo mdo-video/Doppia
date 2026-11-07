@@ -30,6 +30,8 @@ import android.text.SpannableString
 import android.text.method.DigitsKeyListener
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -69,11 +71,74 @@ class RecButton(ctx: Context) : View(ctx) {
     var pending = false
         set(v) { field = v; alpha = if (v) 0.45f else 1f }
 
+    /** Durata (ms) da tenere premuto per fermare il REC: un tocco per sbaglio non chiude un take. */
+    var holdMs = 800L
+    /** Chiamata quando il tasto e' stato tenuto premuto abbastanza a lungo per fermare il REC. */
+    var onHoldStop: (() -> Unit)? = null
+    private var holdStart = 0L
+    private var holdProgress = 0f
+    private val arc = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = 0xFFFFC107.toInt()
+        strokeWidth = ctx.dp(4).toFloat()
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val holdTick = object : Runnable {
+        override fun run() {
+            if (holdStart == 0L) return
+            val p = ((SystemClock.uptimeMillis() - holdStart) / holdMs.toFloat()).coerceIn(0f, 1f)
+            holdProgress = p
+            invalidate()
+            if (p >= 1f) {
+                holdStart = 0L
+                holdProgress = 0f
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                invalidate()
+                onHoldStop?.invoke()
+            } else {
+                postOnAnimation(this)
+            }
+        }
+    }
+
+    private fun cancelHold() {
+        holdStart = 0L
+        holdProgress = 0f
+        removeCallbacks(holdTick)
+        invalidate()
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (!recording) return super.onTouchEvent(e)
+        if (pending) return true
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                holdStart = SystemClock.uptimeMillis()
+                postOnAnimation(holdTick)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (e.x < 0f || e.y < 0f || e.x > width || e.y > height) cancelHold()
+            }
+            MotionEvent.ACTION_UP -> {
+                if (holdStart != 0L) {
+                    cancelHold()
+                    Toast.makeText(context, "Tieni premuto per fermare il REC", Toast.LENGTH_SHORT).show()
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> cancelHold()
+        }
+        return true
+    }
+
     override fun onDraw(c: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
         val r = width / 2f - ring.strokeWidth
         c.drawCircle(cx, cy, r, ring)
+        if (holdProgress > 0f) {
+            val rr = r + ring.strokeWidth / 2f
+            c.drawArc(cx - rr, cy - rr, cx + rr, cy + rr, -90f, 360f * holdProgress, false, arc)
+        }
         if (recording) {
             val h = r * 0.5f
             c.drawRoundRect(cx - h, cy - h, cx + h, cy + h, h * 0.25f, h * 0.25f, fill)
@@ -449,6 +514,20 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val connectBtn = MaterialButton(ctx)
 
     private val recPill = TextView(ctx)
+    private val topBox = LinearLayout(ctx)
+    private val sceneV = TextView(ctx)
+    private val alertV = TextView(ctx)
+    private val misV = TextView(ctx)
+    private val lostBox = LinearLayout(ctx)
+    private val lostText = TextView(ctx)
+    private val lostCancel = TextView(ctx)
+    private var barDivider: View? = null
+    /** Modalita' Ripresa: solo tally, tempo, batteria e memoria, avvisi; zebra, esposizione e impostazioni restano nel Setup. */
+    private var shoot = false
+    /** Collegamento perso: ultimo fotogramma scuro e stato REC mantenuto mentre l'app riprova. */
+    private var lost = false
+    private var sceneText = ""
+    private val alertHide = Runnable { alertV.visibility = View.GONE }
     private val batt = TextView(ctx)
     private val recBtn = RecButton(ctx)
     private val bar = LinearLayout(ctx)
@@ -459,7 +538,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val pickerRow = LinearLayout(ctx)
     private val chipBox = HashMap<Int, LinearLayout>()
     private val chipVal = HashMap<Int, TextView>()
-    private val chipCodes = intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO)
+    private val chipCodes = intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.WB, SonyProps.KELVIN)
     private val pickerItems = ArrayList<Pair<Long, TextView>>()
     private var props: Map<Int, Prop> = emptyMap()
     private var pickerCode = 0
@@ -494,11 +573,18 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         setStroke(ctx.dp(4), 0xFFE53935.toInt())
         cornerRadius = ctx.dp(22).toFloat()
     }
+    private val borderWarn = GradientDrawable().apply {
+        setColor(0)
+        setStroke(ctx.dp(8), 0xFFFFA000.toInt())
+        cornerRadius = ctx.dp(22).toFloat()
+    }
 
     /** True se la camera sta registrando (letto dalla camera, mai ipotizzato). */
     var recording = false
         private set
     var onRec: (() -> Unit)? = null
+    /** Chiamata quando si tocca "Smetti di riprovare" durante la riconnessione automatica. */
+    var onGiveUp: (() -> Unit)? = null
     /** Chiamata quando la camera inizia (true) o finisce (false) di registrare. */
     var onRecChange: ((Boolean) -> Unit)? = null
     var onConnect: (() -> Unit)? = null
@@ -658,10 +744,53 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         recPill.setPadding(dp(14), dp(6), dp(14), dp(6))
         recPill.background = roundBg(0xE6C62828.toInt(), 16, ctx)
         recPill.visibility = View.GONE
+        topBox.orientation = LinearLayout.VERTICAL
+        topBox.gravity = Gravity.CENTER_HORIZONTAL
+        topBox.addView(recPill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        fun topChild(v: TextView, size: Float, color: Int, bg: Int) {
+            v.textSize = size
+            v.setTextColor(color)
+            v.typeface = Typeface.DEFAULT_BOLD
+            v.gravity = Gravity.CENTER
+            v.setPadding(dp(12), dp(5), dp(12), dp(5))
+            v.background = roundBg(bg, 14, ctx)
+            v.visibility = View.GONE
+            val l = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            l.topMargin = dp(6)
+            topBox.addView(v, l)
+        }
+        topChild(sceneV, 13f, Pal.TEXT, 0xCC0B0F15.toInt())
+        topChild(misV, 17f, Pal.BG, 0xFFFFA000.toInt())
+        misV.text = "⚠ NON IN REC"
+        topChild(alertV, 15f, Color.WHITE, 0xF0E65100.toInt())
         val rp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         rp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         rp.topMargin = dp(12)
-        addView(recPill, rp)
+        addView(topBox, rp)
+
+        // Collegamento perso: avviso al centro mentre l'app riprova da sola
+        lostBox.orientation = LinearLayout.VERTICAL
+        lostBox.gravity = Gravity.CENTER
+        lostBox.background = roundBg(0xEE0B0F15.toInt(), 20, ctx)
+        lostBox.setPadding(dp(22), dp(16), dp(22), dp(16))
+        lostBox.isClickable = true
+        lostBox.visibility = View.GONE
+        lostText.setTextColor(Color.WHITE)
+        lostText.textSize = 16f
+        lostText.typeface = Typeface.DEFAULT_BOLD
+        lostText.gravity = Gravity.CENTER
+        lostBox.addView(lostText)
+        lostCancel.text = "Smetti di riprovare"
+        lostCancel.setTextColor(Pal.TEXT)
+        lostCancel.textSize = 13f
+        lostCancel.typeface = Typeface.DEFAULT_BOLD
+        lostCancel.background = roundBg(Pal.LINE, 14, ctx)
+        lostCancel.setPadding(dp(14), dp(7), dp(14), dp(7))
+        lostCancel.setOnClickListener { onGiveUp?.invoke() }
+        val lcLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lcLp.topMargin = dp(12)
+        lostBox.addView(lostCancel, lcLp)
+        addView(lostBox, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         // Istogramma in basso a sinistra
         histV.visibility = View.GONE
@@ -677,21 +806,24 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         bar.setPadding(dp(8), dp(5), dp(8), dp(5))
         bar.visibility = View.GONE
 
+        // Avvio con un tocco; lo stop richiede di tenere premuto (vedi RecButton)
         recBtn.setOnClickListener {
-            recBtn.pending = true
-            postDelayed({ recBtn.pending = false }, 7000)
-            onRec?.invoke()
+            if (recording || recBtn.pending) return@setOnClickListener
+            sendRec()
         }
+        recBtn.onHoldStop = { if (recording && !recBtn.pending) sendRec() }
         bar.addView(recBtn, LinearLayout.LayoutParams(dp(46), dp(46)))
-        bar.addView(divider())
+        val dv = divider()
+        barDivider = dv
+        bar.addView(dv)
 
-        val titles = arrayOf("SHUTTER", "IRIS", "ISO")
+        val titles = arrayOf("SHUTTER", "IRIS", "ISO", "WB", "KELVIN")
         for (k in chipCodes.indices) {
             val code = chipCodes[k]
             val box = LinearLayout(ctx)
             box.orientation = LinearLayout.VERTICAL
             box.gravity = Gravity.CENTER
-            box.setPadding(dp(12), dp(3), dp(12), dp(3))
+            box.setPadding(dp(9), dp(3), dp(9), dp(3))
             val t = TextView(ctx)
             t.text = titles[k]
             t.textSize = 9f
@@ -715,7 +847,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         meterBox.gravity = Gravity.CENTER_VERTICAL
         meterBox.visibility = View.GONE
         meterBox.addView(divider())
-        meterBox.addView(meterV, LinearLayout.LayoutParams(dp(150), dp(38)))
+        meterBox.addView(meterV, LinearLayout.LayoutParams(dp(130), dp(38)))
         bar.addView(meterBox)
 
         val barLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -819,6 +951,99 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         addView(ovlPanel, pnLp)
     }
 
+    private fun sendRec() {
+        recBtn.pending = true
+        postDelayed({ recBtn.pending = false }, 7000)
+        onRec?.invoke()
+    }
+
+    private fun kelvinShown(): Boolean =
+        props[SonyProps.KELVIN] != null && props[SonyProps.WB]?.current == SonyProps.WB_KELVIN
+
+    private fun chipText(code: Int, p: Prop?): String = when {
+        p == null -> "—"
+        code == SonyProps.WB -> SonyProps.fmtWbShort(p.current)
+        else -> SonyProps.fmt(code, p.current)
+    }
+
+    /** Chip della barra: in Ripresa spariscono (resta solo il REC, piu' grande); KELVIN solo con WB in temperatura colore. */
+    private fun updateChips() {
+        for (code in chipCodes) {
+            val show = !shoot && (code != SonyProps.KELVIN || kelvinShown())
+            chipBox[code]?.visibility = if (show) View.VISIBLE else View.GONE
+        }
+        barDivider?.visibility = if (shoot) View.GONE else View.VISIBLE
+        val sz = dp(if (shoot) 64 else 46)
+        val lp = recBtn.layoutParams
+        if (lp != null && lp.width != sz) {
+            lp.width = sz
+            lp.height = sz
+            recBtn.layoutParams = lp
+        }
+    }
+
+    /** Modalita' Ripresa (true) o Setup (false). */
+    fun setShootMode(on: Boolean) {
+        shoot = on
+        closePicker()
+        ovlPanel.visibility = View.GONE
+        updateChips()
+        if (on) {
+            for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, meterBox, overlayImg)) v.visibility = View.GONE
+        } else if (hasFrame && !lost) {
+            side.visibility = View.VISIBLE
+            lag.visibility = View.VISIBLE
+            overlayImg.visibility = if (overlayBmp != null) View.VISIBLE else View.GONE
+        }
+        updateGuideBar()
+    }
+
+    /** Collegamento perso: ultimo fotogramma scuro e stato REC mantenuto, con un avviso al centro; false per tornare normale. */
+    fun setLost(on: Boolean, text: String = "") {
+        if (on) {
+            lost = true
+            lostText.text = text
+            lostBox.visibility = View.VISIBLE
+            img.alpha = 0.3f
+            batt.alpha = 0.5f
+            closePicker()
+            for (v in arrayOf<View>(zebraImg, peakImg, histV, lag, side, bar, guideBar, ovlPanel, meterBox, overlayImg)) v.visibility = View.GONE
+        } else if (lost) {
+            lost = false
+            lostBox.visibility = View.GONE
+            img.alpha = 1f
+            batt.alpha = 1f
+        }
+    }
+
+    /** Avviso temporaneo in alto (REC fermato dalla camera, camera calda, connessione persa...). */
+    fun showAlert(text: String) {
+        alertV.text = text
+        alertV.visibility = View.VISIBLE
+        removeCallbacks(alertHide)
+        postDelayed(alertHide, 15000)
+    }
+
+    /** REC non allineato (l'altra camera registra, questa no): scritta e bordo arancioni che lampeggiano. */
+    fun setMisaligned(on: Boolean, phase: Boolean) {
+        misV.visibility = if (on) View.VISIBLE else View.GONE
+        misV.alpha = if (phase) 1f else 0.35f
+        if (!recording) foreground = if (on && phase) borderWarn else null
+    }
+
+    /** Scena e inquadratura scelte per il prossimo take (vuoto = nessuna). */
+    fun setScene(text: String) {
+        sceneText = text
+        updateScene()
+    }
+
+    private fun updateScene() {
+        val show = sceneText.isNotEmpty() && hasFrame
+        sceneV.visibility = if (show) View.VISIBLE else View.GONE
+        val t = "🎬 $sceneText"
+        if (show && sceneV.text.toString() != t) sceneV.text = t
+    }
+
     /** Pulsanti screenshot e sovrapposizione dal lato esterno: a destra per il riquadro di destra, a sinistra per quello di sinistra. */
     fun setSide(right: Boolean) {
         val g = Gravity.BOTTOM or (if (right) Gravity.END else Gravity.START)
@@ -856,16 +1081,17 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         img.setImageBitmap(b)
         lastFrame = b
         hasFrame = true
-        side.visibility = View.VISIBLE
-        overlayImg.visibility = if (overlayBmp != null) View.VISIBLE else View.GONE
+        side.visibility = if (shoot) View.GONE else View.VISIBLE
+        overlayImg.visibility = if (overlayBmp != null && !shoot) View.VISIBLE else View.GONE
         msgBox.visibility = View.GONE
-        lag.visibility = View.VISIBLE
+        lag.visibility = if (shoot) View.GONE else View.VISIBLE
+        updateScene()
         val s = SpannableString("● $ms ms")
         s.setSpan(ForegroundColorSpan(lagColor(ms)), 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         lag.text = s
 
         gridV.aspect = b.width.toFloat() / b.height
-        gridV.visibility = if (Monitor.grid) View.VISIBLE else View.GONE
+        gridV.visibility = if (Monitor.grid && !shoot) View.VISIBLE else View.GONE
         gridV.invalidate()
         guideV.aspect = b.width.toFloat() / b.height
         guideV.mask = Monitor.guides
@@ -876,15 +1102,15 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
-        zebraImg.visibility = if (z != null) View.VISIBLE else View.GONE
+        zebraImg.visibility = if (z != null && !shoot) View.VISIBLE else View.GONE
         val pk = a?.peaking
         peakImg.setImageBitmap(pk)
-        peakImg.visibility = if (pk != null) View.VISIBLE else View.GONE
+        peakImg.visibility = if (pk != null && !shoot) View.VISIBLE else View.GONE
 
         histV.bins = a?.hist
-        histV.visibility = if (a?.hist != null) View.VISIBLE else View.GONE
+        histV.visibility = if (a?.hist != null && !shoot) View.VISIBLE else View.GONE
 
-        if (a != null && Monitor.meter) {
+        if (a != null && Monitor.meter && !shoot) {
             evSmooth = evSmooth * 0.8f + a.ev * 0.2f
             meterV.ev = evSmooth
             meterBox.visibility = View.VISIBLE
@@ -933,6 +1159,11 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     fun setState(st: CamState) {
         camState = st
         updateTag()
+        if (lost) {
+            // collegamento perso: non azzero nulla (l'ultimo fotogramma e lo stato REC restano), torno normale solo con LIVE
+            if (st == CamState.LIVE) setLost(false)
+            return
+        }
         when (st) {
             CamState.IDLE -> clear("Nessun segnale", "Connetti")
             CamState.CONNECTING -> clear("Mi collego…", "Annulla")
@@ -945,7 +1176,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
     /** Aggiorna la barra guide: lucchetto, pulsanti di posizione e testo con la posizione della guida scelta. */
     private fun updateGuideBar() {
-        if (Monitor.guides == 0 || !hasFrame) {
+        if (Monitor.guides == 0 || !hasFrame || shoot || lost) {
             guideBar.visibility = View.GONE
             guideV.locked = true
             return
@@ -979,13 +1210,14 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         for (code in chipCodes) {
             val p = m[code]
             val tv = chipVal[code]!!
-            tv.text = if (p == null) "—" else SonyProps.fmt(code, p.current)
+            tv.text = chipText(code, p)
             tv.setTextColor(if (p != null && p.settable) Pal.TEXT else Pal.MUTED)
             chipBox[code]!!.background = if (pickerCode == code) roundBg(0x33FFC107.toInt(), 12, context) else null
         }
+        updateChips()
         if (pickerCode != 0) {
             val p = m[pickerCode]
-            if (p == null || !p.settable) closePicker() else highlight(p.current, false)
+            if (p == null || !p.settable || (pickerCode == SonyProps.KELVIN && !kelvinShown())) closePicker() else highlight(p.current, false)
         }
         val bl = SonyProps.batteryPercent(m)
         val mem = SonyProps.mediaSeconds(m)
@@ -1087,6 +1319,11 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         recPill.visibility = View.GONE
         foreground = null
         batt.visibility = View.GONE
+        setLost(false)
+        lostBox.visibility = View.GONE
+        sceneV.visibility = View.GONE
+        misV.visibility = View.GONE
+        alertV.visibility = View.GONE
         val was = recording
         recording = false
         recBtn.recording = false
@@ -1108,6 +1345,31 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recAllBtn: MaterialButton
     private lateinit var syncBtn: MaterialButton
     private var syncOn = false
+    private lateinit var modeBtn: MaterialButton
+    private lateinit var sceneBtn: MaterialButton
+    private lateinit var shootRow: LinearLayout
+    private val setupOnly = ArrayList<View>()
+    private var shootMode = false
+    private var holdDone = false
+    // riconnessione automatica
+    private val want = BooleanArray(2)
+    private val everLive = BooleanArray(2)
+    private val retryN = IntArray(2)
+    private val lostAt = LongArray(2)
+    private val retryRun = arrayOfNulls<Runnable>(2)
+    // REC non allineato
+    private var mismatchSince = 0L
+    private var blinkPhase = false
+    private val alignRun = object : Runnable {
+        override fun run() {
+            checkAlign()
+            rootView.postDelayed(this, 500)
+        }
+    }
+    // ultimi valori di batteria e memoria letti da ogni camera (per la scheda sessione)
+    private val lastBat = arrayOfNulls<Int>(2)
+    private val lastMem = arrayOfNulls<String>(2)
+    private val lastInfoAt = LongArray(2)
     private lateinit var updBtn: MaterialButton
     private var pendingUpdate: Updater.Release? = null
     @Volatile private var updCancel = false
@@ -1135,6 +1397,11 @@ class MainActivity : AppCompatActivity() {
         Monitor.load(prefs)
         syncOn = prefs.getBoolean("sync", false)
         Session.load(prefs)
+        for (i in 0..1) {
+            if (prefs.contains("lbat$i")) lastBat[i] = prefs.getInt("lbat$i", 0)
+            lastMem[i] = prefs.getString("lmem$i", null)
+            lastInfoAt[i] = prefs.getLong("lat$i", 0L)
+        }
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -1169,7 +1436,35 @@ class MainActivity : AppCompatActivity() {
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         recAllBtn = pillButton("REC A+B")
         recAllBtn.backgroundTintList = ColorStateList.valueOf(0xFFB71C1C.toInt())
-        recAllBtn.setOnClickListener { recBoth() }
+        recAllBtn.setOnClickListener {
+            if (tiles.any { it.recording }) Toast.makeText(this, "Tieni premuto per fermare il REC", Toast.LENGTH_SHORT).show()
+            else recBoth()
+        }
+        // con una camera in REC, lo stop richiede di tenere premuto (un tocco per sbaglio non chiude i take)
+        val holdStop = Runnable {
+            recAllBtn.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            recBoth()
+            holdDone = true
+            paintRecAll()
+        }
+        recAllBtn.setOnTouchListener { v, e ->
+            if (!tiles.any { it.recording }) return@setOnTouchListener false
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    holdDone = false
+                    recAllBtn.text = "Tieni premuto…"
+                    v.postDelayed(holdStop, 800)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(holdStop)
+                    if (!holdDone && e.actionMasked == MotionEvent.ACTION_UP) {
+                        Toast.makeText(this, "Tieni premuto per fermare il REC", Toast.LENGTH_SHORT).show()
+                    }
+                    paintRecAll()
+                }
+            }
+            true
+        }
         val setBtn = pillButton("Impostazioni")
         setBtn.setOnClickListener { showSettings() }
         syncBtn = pillButton("Sync")
@@ -1194,12 +1489,23 @@ class MainActivity : AppCompatActivity() {
         noteBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
         noteBtn.setTextColor(Pal.BG)
         noteBtn.setOnClickListener { noteDialog() }
+        sceneBtn = pillButton("🎬 Scena")
+        sceneBtn.maxWidth = dp(260)
+        sceneBtn.maxLines = 1
+        sceneBtn.ellipsize = android.text.TextUtils.TruncateAt.END
+        sceneBtn.setOnClickListener { sceneDialog() }
+        modeBtn = pillButton("▶ Ripresa")
+        modeBtn.setOnClickListener { setShootMode(!shootMode) }
+        bar.addView(sceneBtn, spaced(10))
         bar.addView(syncBtn, spaced(10))
         bar.addView(goodBtn, spaced(6))
         bar.addView(badBtn, spaced(6))
         bar.addView(noteBtn, spaced(6))
         bar.addView(recAllBtn, spaced(6))
+        bar.addView(modeBtn, spaced(6))
         bar.addView(setBtn, spaced(6))
+        // in Ripresa spariscono: aggiornamento, Sync, segni piccoli (ci sono quelli grandi in basso), Impostazioni
+        setupOnly.addAll(listOf<View>(updBtn, syncBtn, goodBtn, badBtn, noteBtn, setBtn))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Area dei due riquadri, con il log sopra
@@ -1219,6 +1525,7 @@ class MainActivity : AppCompatActivity() {
             t.onOvlClear = { overlayClear(i) }
             t.onOvlOpacity = { pct -> prefs.edit().putInt("ovlop$i", pct).apply() }
             t.onRec = { cams[i]?.toggleRec() }
+            t.onGiveUp = { giveUp(i) }
             t.onRecChange = { r -> onRecChange(i, r) }
             t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
@@ -1261,10 +1568,41 @@ class MainActivity : AppCompatActivity() {
         sp.topMargin = dp(10)
         root.addView(stage, sp)
 
+        // Pulsanti grandi per i segni, in basso sotto il pollice (solo in Ripresa)
+        shootRow = LinearLayout(this)
+        shootRow.orientation = LinearLayout.HORIZONTAL
+        shootRow.visibility = View.GONE
+        fun bigMark(text: String, cat: Int, action: () -> Unit) {
+            val b = MaterialButton(this)
+            b.text = text
+            b.isAllCaps = false
+            b.textSize = 22f
+            b.typeface = Typeface.DEFAULT_BOLD
+            b.setTextColor(Pal.BG)
+            b.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[cat])
+            b.cornerRadius = dp(28)
+            b.insetTop = 0
+            b.insetBottom = 0
+            b.setOnClickListener { action() }
+            Springs.pressable(b)
+            val lp = LinearLayout.LayoutParams(0, dp(76), 1f)
+            if (shootRow.childCount > 0) lp.leftMargin = dp(10)
+            shootRow.addView(b, lp)
+        }
+        bigMark("⚑ Buona", MarkCat.GOOD) { addMark(MarkCat.GOOD, "") }
+        bigMark("⚑ Scarto", MarkCat.BAD) { addMark(MarkCat.BAD, "") }
+        bigMark("⚑ Nota", MarkCat.NOTE) { noteDialog() }
+        val srp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        srp.topMargin = dp(10)
+        root.addView(shootRow, srp)
+
         setContentView(root)
         applyTally()
         refreshStatus()
-        addLog("Doppia 1.2: live, REC, esposizione, segni e take per Premiere, tally grande.")
+        paintScene()
+        setShootMode(prefs.getBoolean("shoot", false))
+        rootView.postDelayed(alignRun, 500)
+        addLog("Doppia 1.6: Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -1280,6 +1618,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        rootView.removeCallbacks(alignRun)
+        for (i in 0..1) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
         for (i in 0..1) cams[i]?.stop()
         super.onDestroy()
     }
@@ -1453,7 +1793,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (r != null && r.build + 1L > installedCode()) {
                         pendingUpdate = r
-                        updBtn.visibility = View.VISIBLE
+                        updBtn.visibility = if (shootMode) View.GONE else View.VISIBLE
                         addLog("Aggiornamento disponibile: ${r.name} (installata ${installedName()})")
                         if (manual) showUpdateDialog(r)
                     } else {
@@ -1541,6 +1881,260 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- Ripresa / Setup ----------
+
+    /** Ripresa: restano tally, tempo, batteria e memoria, avvisi e segni grandi. Setup: tutti gli strumenti. */
+    private fun setShootMode(on: Boolean) {
+        shootMode = on
+        prefs.edit().putBoolean("shoot", on).apply()
+        for (v in setupOnly) {
+            v.visibility = when {
+                on -> View.GONE
+                v === updBtn -> if (pendingUpdate != null) View.VISIBLE else View.GONE
+                else -> View.VISIBLE
+            }
+        }
+        shootRow.visibility = if (on) View.VISIBLE else View.GONE
+        modeBtn.text = if (on) "⚙ Setup" else "▶ Ripresa"
+        for (t in tiles) t.setShootMode(on)
+        if (on) settingsDlg?.dismiss()
+    }
+
+    /** REC A+B: con una camera in REC diventa STOP (da tenere premuto). */
+    private fun paintRecAll() {
+        val rec = tiles.any { it.recording }
+        recAllBtn.text = if (rec) "■ STOP A+B" else "REC A+B"
+    }
+
+    // ---------- Scena e inquadratura (nome dei take) ----------
+
+    private fun sceneName(): String = (prefs.getString("scene", "") ?: "").trim()
+    private fun frameName(i: Int): String = (prefs.getString("frame$i", "") ?: "").trim()
+
+    /** Nome del take: "Scena - inquadratura" (o solo uno dei due); vuoto se non e' stato scelto niente. */
+    private fun takeLabel(i: Int): String {
+        val sc = sceneName()
+        val fr = frameName(i)
+        return when {
+            sc.isNotEmpty() && fr.isNotEmpty() -> "$sc - $fr"
+            sc.isNotEmpty() -> sc
+            else -> fr
+        }
+    }
+
+    private fun recentScenes(): List<String> {
+        val out = ArrayList<String>()
+        try {
+            val a = org.json.JSONArray(prefs.getString("scenes", "[]") ?: "[]")
+            for (k in 0 until a.length()) out.add(a.getString(k))
+        } catch (_: Throwable) {}
+        return out
+    }
+
+    private fun rememberScene(sc: String) {
+        if (sc.isEmpty()) return
+        val l = ArrayList<String>()
+        l.add(sc)
+        for (x in recentScenes()) if (!x.equals(sc, ignoreCase = true) && l.size < 8) l.add(x)
+        val a = org.json.JSONArray()
+        for (x in l) a.put(x)
+        prefs.edit().putString("scenes", a.toString()).apply()
+    }
+
+    private fun paintScene() {
+        val sc = sceneName()
+        sceneBtn.text = if (sc.isEmpty()) "🎬 Scena" else "🎬 $sc"
+        for (i in 0..1) tiles[i].setScene(takeLabel(i))
+    }
+
+    /** Scena (una per tutte e due le camere) e inquadratura di ogni camera: il nome entra in elenco, XML e CSV. */
+    private fun sceneDialog() {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(22), dp(18), dp(22), dp(18))
+        val head = TextView(this)
+        head.text = "Scena e inquadratura"
+        head.setTextColor(Pal.TEXT)
+        head.textSize = 20f
+        head.typeface = Typeface.DEFAULT_BOLD
+        col.addView(head)
+        col.addView(note("Il nome vale per i prossimi REC: \"Scena - inquadratura\"."))
+
+        fun field(hint: String, value: String): EditText {
+            val e = EditText(this)
+            e.hint = hint
+            e.setText(value)
+            e.setTextColor(Pal.TEXT)
+            e.setHintTextColor(Pal.MUTED)
+            e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            e.setSingleLine(true)
+            return e
+        }
+        fun chipsRow(items: List<String>, onTap: (String) -> Unit): View {
+            val r = LinearLayout(this)
+            r.orientation = LinearLayout.HORIZONTAL
+            for (q in items) {
+                val c = TextView(this)
+                c.text = q
+                c.setTextColor(Pal.TEXT)
+                c.textSize = 14f
+                c.typeface = Typeface.DEFAULT_BOLD
+                c.setPadding(dp(13), dp(8), dp(13), dp(8))
+                c.background = roundBg(Pal.LINE, 16, this)
+                c.setOnClickListener { onTap(q) }
+                r.addView(c, spaced(8))
+            }
+            val hs = HorizontalScrollView(this)
+            hs.isHorizontalScrollBarEnabled = false
+            hs.addView(r)
+            return hs
+        }
+        val lpTop = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = dp(10) } }
+
+        col.addView(sectionTitle("Scena"))
+        val sceneEt = field("es. Intervista, Cerimonia, Brindisi", sceneName())
+        col.addView(sceneEt, lpTop())
+        val recents = recentScenes()
+        if (recents.isNotEmpty()) col.addView(chipsRow(recents) { sceneEt.setText(it); sceneEt.setSelection(it.length) }, lpTop())
+
+        val presets = listOf("Totale", "Campo medio", "Primo piano", "Dettaglio", "Cutaway", "Making of")
+        val frameEts = arrayOfNulls<EditText>(2)
+        for (i in 0..1) {
+            col.addView(sectionTitle("Inquadratura " + camName(i)))
+            val et = field("es. Primo piano", frameName(i))
+            frameEts[i] = et
+            col.addView(et, lpTop())
+            col.addView(chipsRow(presets) { et.setText(it); et.setSelection(it.length) }, lpTop())
+        }
+
+        val dlg = Dialog(this)
+        fun save() {
+            val sc = sceneEt.text.toString().trim()
+            prefs.edit()
+                .putString("scene", sc)
+                .putString("frame0", frameEts[0]!!.text.toString().trim())
+                .putString("frame1", frameEts[1]!!.text.toString().trim())
+                .apply()
+            rememberScene(sc)
+            paintScene()
+            dlg.dismiss()
+            val a = takeLabel(0)
+            val b = takeLabel(1)
+            addLog("Scena: " + (if (a.isEmpty() && b.isEmpty()) "nessuna" else "${camName(0)} = ${a.ifEmpty { "—" }}, ${camName(1)} = ${b.ifEmpty { "—" }}"))
+        }
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.END
+        val clear = pillButton("Svuota")
+        clear.setOnClickListener {
+            sceneEt.setText("")
+            for (e in frameEts) e?.setText("")
+        }
+        val cancel = pillButton("Annulla")
+        cancel.setOnClickListener { dlg.dismiss() }
+        val ok = pillButton("Salva")
+        ok.backgroundTintList = ColorStateList.valueOf(Pal.MID)
+        ok.setTextColor(Pal.BG)
+        ok.setOnClickListener { save() }
+        row.addView(clear)
+        row.addView(cancel, spaced(8))
+        row.addView(ok, spaced(8))
+        val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        rlp.topMargin = dp(18)
+        col.addView(row, rlp)
+
+        val scroll = ScrollView(this)
+        scroll.addView(col)
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dlg.setContentView(scroll)
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dlg.show()
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.55f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
+    // ---------- Avvisi: vibrazione, suono, REC non allineato ----------
+
+    private fun buzz() {
+        try {
+            val v = if (Build.VERSION.SDK_INT >= 31) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            }
+            if (v.hasVibrator()) v.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250, 120, 450), -1))
+        } catch (_: Throwable) {}
+        try {
+            val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90)
+            tg.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 700)
+            rootView.postDelayed({ try { tg.release() } catch (_: Throwable) {} }, 1500)
+        } catch (_: Throwable) {}
+    }
+
+    /** Avviso sul riquadro della camera i, con vibrazione e suono. */
+    private fun alertCam(i: Int, text: String) {
+        addLog("AVVISO ${camName(i)}: $text")
+        tiles[i].showAlert("⚠ $text")
+        buzz()
+    }
+
+    /** Ogni mezzo secondo: se una camera registra e l'altra no (tutte e due live) per piu' di 2,5 s, il riquadro che non registra lampeggia. */
+    private fun checkAlign() {
+        val on = prefs.getBoolean("alignwarn", true)
+        val bothLive = liveNow[0] && liveNow[1]
+        val diff = tiles[0].recording != tiles[1].recording
+        if (on && bothLive && diff) {
+            val now = SystemClock.elapsedRealtime()
+            if (mismatchSince == 0L) mismatchSince = now
+            if (now - mismatchSince > 2500L) {
+                blinkPhase = !blinkPhase
+                val idle = if (tiles[0].recording) 1 else 0
+                tiles[idle].setMisaligned(true, blinkPhase)
+                tiles[1 - idle].setMisaligned(false, false)
+                if (now - mismatchSince in 2500L..3100L) addLog("REC non allineato: ${camName(idle)} non registra")
+                return
+            }
+        }
+        mismatchSince = 0L
+        for (t in tiles) t.setMisaligned(false, false)
+    }
+
+    // ---------- Riconnessione automatica ----------
+
+    /** Smette di riprovare (tasto sul riquadro): la camera torna a "Connetti". */
+    private fun giveUp(i: Int) {
+        want[i] = false
+        everLive[i] = false
+        lostAt[i] = 0L
+        retryN[i] = 0
+        retryRun[i]?.let { rootView.removeCallbacks(it) }
+        cams[i]?.stop()
+        cams[i] = null
+        tiles[i].setLost(false)
+        tiles[i].setState(CamState.IDLE)
+        liveNow[i] = false
+        addLog("${camName(i)}: riconnessione annullata")
+        refreshStatus()
+        refreshSettings()
+    }
+
+    private fun scheduleRetry(i: Int) {
+        val delay = when {
+            retryN[i] < 4 -> 2000L
+            retryN[i] < 12 -> 4000L
+            else -> 12000L
+        }
+        retryN[i]++
+        retryRun[i]?.let { rootView.removeCallbacks(it) }
+        val r = Runnable {
+            if (want[i] && cams[i] == null) connect(i, true)
+        }
+        retryRun[i] = r
+        rootView.postDelayed(r, delay)
+        tiles[i].setLost(true, "Connessione persa\nriprovo da solo… (tentativo ${retryN[i]})")
+    }
+
     private fun paintSync() {
         syncBtn.backgroundTintList = ColorStateList.valueOf(if (syncOn) Pal.MID else Pal.LINE)
         syncBtn.setTextColor(if (syncOn) Pal.BG else Pal.TEXT)
@@ -1576,17 +2170,21 @@ class MainActivity : AppCompatActivity() {
         val lag = prefs.getInt("reclag", 300)
         val now = System.currentTimeMillis()
         if (r) {
-            val t = Session.startTake(i, now - lag)
+            val t = Session.startTake(i, now - lag, takeLabel(i))
             if (Monitor.guides != 0) {
                 val g = Guides.snapshot(i, Monitor.guides, tiles[i].frameAspect())
                 t.gj = g.first
                 t.gt = g.second
             }
-            addLog("${camName(i)}: take ${t.num} avviato" + (if (t.gt.isNotEmpty()) " (guide: ${t.gt})" else ""))
+            addLog("${camName(i)}: take ${t.num} avviato" + (if (t.name.isNotEmpty()) " \"${t.name}\"" else "") + (if (t.gt.isNotEmpty()) " (guide: ${t.gt})" else ""))
         } else {
             val t = Session.openTake(i)
             Session.closeTake(i, now)
             if (t != null) addLog("${camName(i)}: take ${t.num} chiuso")
+            // stop che Doppia non ha chiesto (camera calda, scheda piena, batteria, tasto sulla camera)
+            val cam = cams[i]
+            val asked = cam != null && now - cam.lastRecCmd < 15000L
+            if (t != null && liveNow[i] && !asked) alertCam(i, "REC fermato sulla camera (non da Doppia)")
         }
         Session.save(prefs)
         applyTally()
@@ -1598,6 +2196,7 @@ class MainActivity : AppCompatActivity() {
         for (t in tiles) t.setBigTally(big)
         val any = tiles.any { it.recording }
         rootView.setBackgroundColor(if (any && big) 0xFFC62828.toInt() else Pal.BG)
+        paintRecAll()
     }
 
     /** Segna un momento sul take in corso di ogni camera che registra (tempo dall'inizio del take). */
@@ -1726,6 +2325,40 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Throwable) {
             addLog("Esportazione: ${e.message ?: e.javaClass.simpleName}")
             Toast.makeText(this, "Esportazione non riuscita", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun finalInfoLine(i: Int): String {
+        val parts = ArrayList<String>()
+        lastBat[i]?.let { parts.add("Batteria $it%") }
+        lastMem[i]?.let { parts.add("Memoria residua $it") }
+        if (parts.isEmpty()) return ""
+        val at = lastInfoAt[i]
+        return parts.joinToString("   ") + (if (at > 0L) "   (ultima lettura " + Session.clockOf(at).substring(0, 5) + ")" else "")
+    }
+
+    /** Scheda di fine giornata in un file di testo da condividere (WhatsApp, e-mail...). */
+    private fun exportCard() {
+        if (Session.takes.isEmpty() && Session.marks.isEmpty()) {
+            Toast.makeText(this, "Nessun take: registra prima con REC", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val dir = File(filesDir, "export")
+            dir.mkdirs()
+            dir.listFiles()?.filter { it.name.startsWith("Doppia_Sessione_") }?.forEach { it.delete() }
+            val base = "Doppia_Sessione_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.ROOT).format(Date())
+            val f = File(dir, "$base.txt")
+            f.writeText(Session.card(camNames(), listOf(finalInfoLine(0), finalInfoLine(1))), Charsets.UTF_8)
+            val it2 = Intent(Intent.ACTION_SEND)
+            it2.type = "text/plain"
+            it2.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(this, "$packageName.fileprovider", f))
+            it2.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(it2, "Scheda sessione"))
+            addLog("Scheda sessione: $base.txt")
+        } catch (e: Throwable) {
+            addLog("Scheda sessione: ${e.message ?: e.javaClass.simpleName}")
+            Toast.makeText(this, "Scheda non riuscita", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1868,6 +2501,10 @@ class MainActivity : AppCompatActivity() {
             applyTally()
         })
 
+        col.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se l'altra registra)", prefs.getBoolean("alignwarn", true)) {
+            prefs.edit().putBoolean("alignwarn", it).apply()
+        })
+
         val mrow = LinearLayout(this)
         mrow.orientation = LinearLayout.HORIZONTAL
         val mexp = pillButton("Esporta per Premiere")
@@ -1901,6 +2538,13 @@ class MainActivity : AppCompatActivity() {
         val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mlp.topMargin = dp(8)
         col.addView(mrow, mlp)
+        val mcard = pillButton("Scheda sessione (file da condividere)")
+        mcard.backgroundTintList = ColorStateList.valueOf(Pal.MID)
+        mcard.setTextColor(Pal.BG)
+        mcard.setOnClickListener { exportCard() }
+        val mclp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        mclp.topMargin = dp(8)
+        col.addView(mcard, mclp)
 
         col.addView(sectionTitle("Aggiornamenti"))
         col.addView(note("Versione installata: ${installedName()}"))
@@ -1959,12 +2603,13 @@ class MainActivity : AppCompatActivity() {
         dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.6f).toInt(), (resources.displayMetrics.heightPixels * 0.85f).toInt())
     }
 
-    private val paramCodes = intArrayOf(SonyProps.EXP_MODE, SonyProps.EXP_COMP, SonyProps.METERING, SonyProps.WB)
+    private val paramCodes = intArrayOf(SonyProps.EXP_MODE, SonyProps.EXP_COMP, SonyProps.METERING, SonyProps.WB, SonyProps.KELVIN)
     private val paramNames = mapOf(
         SonyProps.EXP_MODE to "Modo esposizione",
         SonyProps.EXP_COMP to "Compensazione EV",
         SonyProps.METERING to "Misurazione luce",
-        SonyProps.WB to "Bilanciamento bianco"
+        SonyProps.WB to "Bilanciamento bianco",
+        SonyProps.KELVIN to "Temperatura colore (K)"
     )
 
     private fun paramSig(): String {
@@ -2276,25 +2921,38 @@ class MainActivity : AppCompatActivity() {
     private fun toggle(i: Int) {
         val running = cams[i]
         if (running != null) {
+            // scollegata dall'utente: niente riconnessione automatica
+            want[i] = false
+            everLive[i] = false
+            lostAt[i] = 0L
+            retryN[i] = 0
+            retryRun[i]?.let { rootView.removeCallbacks(it) }
+            tiles[i].setLost(false)
             running.stop()
             cams[i] = null
             return
         }
+        connect(i, false)
+    }
+
+    /** Collega la camera i. isRetry = tentativo automatico dopo un collegamento perso (il log resta corto). */
+    private fun connect(i: Int, isRetry: Boolean) {
         val ip = if (simOn) "sim$i" else (prefs.getString("ip$i", "") ?: "").trim()
         if (!simOn && !Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(ip)) {
             addLog("${camName(i)}: scrivi un indirizzo IP valido")
             tiles[i].showMessage("Inserisci l'indirizzo IP in Impostazioni")
             return
         }
+        want[i] = true
         val cam = SonyCam(
             ip, guid(), camName(i),
-            { s -> addLog(s) },
+            { s -> if (!isRetry || retryN[i] <= 3 || s.contains("Errore") || s.contains("Live view attivo")) addLog(s) },
             { st -> runOnUiThread { onState(i, st) } },
             { bmp, ms ->
                 val a = Monitor.analyze(bmp)
                 runOnUiThread { tiles[i].setFrame(bmp, ms, a) }
             },
-            { m -> runOnUiThread { tiles[i].setProps(m); refreshSettings() } },
+            { m -> runOnUiThread { tiles[i].setProps(m); noteInfo(i, m); refreshSettings() } },
             simOn
         )
         cams[i] = cam
@@ -2302,11 +2960,62 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onState(i: Int, st: CamState) {
-        tiles[i].setState(st)
         liveNow[i] = st == CamState.LIVE
-        if (st == CamState.ERROR) cams[i] = null
+        if (st == CamState.LIVE) {
+            everLive[i] = true
+            if (lostAt[i] != 0L) {
+                // riconnessa: se c'era un take aperto, il collegamento perso resta segnato nel take
+                val now = System.currentTimeMillis()
+                val secs = ((now - lostAt[i]) / 1000L).toInt()
+                val tk = Session.openTake(i)
+                if (tk != null) {
+                    Session.addLost(tk, lostAt[i], now)
+                    Session.save(prefs)
+                }
+                val msg = "${camName(i)} riconnessa dopo ${tc(secs)}" + (if (tk != null) " (segnato nel take ${tk.num})" else "")
+                addLog(msg)
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                lostAt[i] = 0L
+                retryN[i] = 0
+            }
+        }
+        if (st == CamState.ERROR) {
+            cams[i] = null
+            if (want[i] && everLive[i]) {
+                if (lostAt[i] == 0L) {
+                    lostAt[i] = System.currentTimeMillis()
+                    val rec = tiles[i].recording
+                    addLog("${camName(i)}: connessione persa" + (if (rec) " durante il REC (la camera continua a registrare)" else ""))
+                    if (rec) alertCam(i, "Connessione persa durante il REC")
+                }
+                scheduleRetry(i)
+            }
+        }
+        tiles[i].setState(st)
         refreshStatus()
         refreshSettings()
+    }
+
+    private val lastHeat = LongArray(2)
+
+    /** Ricorda batteria e memoria lette (per la scheda sessione) e controlla l'avviso di temperatura, se la camera lo espone. */
+    private fun noteInfo(i: Int, m: Map<Int, Prop>) {
+        val bl = SonyProps.batteryPercent(m)
+        val mem = SonyProps.memSummary(m)
+        var changed = false
+        if (bl != null && bl != lastBat[i]) { lastBat[i] = bl; changed = true }
+        if (mem != null && mem != lastMem[i]) { lastMem[i] = mem; changed = true }
+        if (changed) {
+            lastInfoAt[i] = System.currentTimeMillis()
+            val e = prefs.edit().putLong("lat$i", lastInfoAt[i])
+            lastBat[i]?.let { e.putInt("lbat$i", it) }
+            lastMem[i]?.let { e.putString("lmem$i", it) }
+            e.apply()
+        }
+        if (SonyProps.overheat(m) && System.currentTimeMillis() - lastHeat[i] > 60000L) {
+            lastHeat[i] = System.currentTimeMillis()
+            alertCam(i, "Camera calda: rischio di spegnimento")
+        }
     }
 
     private fun guid(): ByteArray {

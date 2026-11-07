@@ -1,4 +1,4 @@
-# Doppia 1.2 (live view, REC, esposizione, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.6 (live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,17 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 1.6
+- **Modalità Ripresa**: tasto **▶ Ripresa / ⚙ Setup** in alto (si ricorda anche alla riapertura). In Ripresa restano il live, il tally rosso, il tempo di REC, batteria e memoria, gli avvisi e, in basso, tre pulsanti grandi per i segni (**⚑ Buona**, **⚑ Scarto**, **⚑ Nota**). Spariscono zebra, peaking, istogramma, esposimetro, griglia, barra otturatore/iris/ISO/WB, screenshot, sovrapposizione, Sync, Impostazioni. Il REC resta (più grande). Le guide inquadratura restano disegnate (bloccate).
+- **Stop REC protetto**: per fermare si **tiene premuto** (0,8 s, con anello che si riempie) il pulsante REC del riquadro o **■ STOP A+B**. Un tocco breve non fa nulla e lo ricorda. L'avvio resta a un tocco.
+- **Riconnessione automatica**: se una camera che era live perde il Wi-Fi, l'app riprova da sola (ogni 2-4 s, poi ogni 12 s). Il riquadro resta con l'ultimo fotogramma scuro e **mantiene lo stato REC** (il take non si chiude), con avviso, vibrazione e suono se stava registrando. Quando torna, il buco resta **segnato nel take**: elenco, `.json` (connectionLost), `.csv` (colonna "connessione persa"), marker "Connessione persa" nell'XML. Sul riquadro c'è **Smetti di riprovare**.
+- **Avviso REC non allineato**: se due camere sono live e una registra e l'altra no per più di 2,5 s, il riquadro che non registra lampeggia arancione con "NON IN REC". Si spegne in Impostazioni > Take e segni.
+- **Scheda sessione**: Impostazioni > Take e segni > **Scheda sessione**. File `.txt` da condividere con: data e orario, per camera take, minuti girati, il take più lungo, segni, collegamenti persi, ultima batteria e memoria letta, poi elenco take (con nomi) e segni.
+- **Nomi dei take**: tasto **🎬 Scena** in alto. Scrivi la scena (con le ultime usate a un tocco) e l'inquadratura di ogni camera (Totale, Campo medio, Primo piano, Dettaglio, Cutaway, Making of o testo libero). Il nome del take è "Scena - inquadratura" e compare nell'elenco, nel nome della sequenza nell'XML, nel `.json` (name) e nel `.csv` (colonna "nome"). Si vede anche sul riquadro.
+- **Avvisi di REC fermato e caldo**: se un REC si ferma senza che Doppia l'abbia chiesto (caldo, scheda piena, batteria o tasto sulla camera) compare un avviso con vibrazione e suono, e il log scrive quali proprietà della camera sono cambiate. **Il codice Sony della temperatura non è noto**: copia il log dopo uno stop per caldo e lo inserisco (`SonyProps.TEMP_WARN`). Il log scrive anche le proprietà sconosciute che cambiano.
+- **Bilanciamento del bianco**: chip **WB** nella barra (AWB, DAY, FLUO, TUNG, CLOUD, SHADE, K, C1-C3) e, con WB in temperatura colore, chip **KELVIN** con i valori ammessi dalla camera. Con Sync si applicano anche all'altra camera. I codici oltre 0x8000 e il codice 0xD20F del Kelvin sono da verificare: all'avvio il log scrive "WB ammessi (esadecimale)". Se vedi codici esadecimali al posto dei nomi, copia il log e correggo.
+- Le proprietà Sony a intervallo (min, max, passo) ora si leggono come elenco di valori.
 
 ## Novita' 1.5
 - **Guide spostabili**: con le guide accese compare sotto la batteria una barra con il lucchetto. Le guide partono **bloccate**. Tocca 🔓 per sbloccarle: la guida scelta (con ↔ o ↕ nel nome) si trascina con un dito. Quelle verticali (9:16, 4:5, 1:1) si spostano a destra e sinistra, la 2.39:1 in alto e in basso.

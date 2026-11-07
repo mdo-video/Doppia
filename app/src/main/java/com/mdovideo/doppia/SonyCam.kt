@@ -29,6 +29,9 @@ class SonyCam(
     @Volatile private var lastMap: Map<Int, Prop> = emptyMap()
     @Volatile private var diffBase: Map<Int, Prop>? = null
     @Volatile private var diffLeft = 0
+    /** Ora (ms) dell'ultima richiesta REC fatta da Doppia: serve a capire se uno stop e' stato chiesto da noi o no. */
+    @Volatile var lastRecCmd = 0L
+        private set
 
     /** Imposta ISO / otturatore / diaframma con SDIO_SetExtDevicePropValue (0x9205). */
     fun setProp(p: Prop, value: Long) {
@@ -60,6 +63,7 @@ class SonyCam(
      * due codici "toggle" delle camere piu' nuove) e dopo ciascuno controlla se lo stato REC e' cambiato davvero.
      */
     fun toggleRec() {
+        lastRecCmd = System.currentTimeMillis()
         if (sim) {
             synchronized(simState) { simState[SonyProps.REC_STATE] = if ((simState[SonyProps.REC_STATE] ?: 0L) == 0L) 1L else 0L }
             say("TEST REC: ${if ((simState[SonyProps.REC_STATE] ?: 0L) != 0L) "avvio" else "stop"}")
@@ -125,7 +129,8 @@ class SonyCam(
             add(SonyProps.EXP_COMP, 3, listOf(-2000L, -1000L, 0L, 1000L, 2000L))
             add(SonyProps.EXP_MODE, 4, listOf(1L, 2L, 3L, 4L))
             add(SonyProps.METERING, 4, listOf(0x8001L, 0x8002L, 0x8004L))
-            add(SonyProps.WB, 4, listOf(2L, 4L, 5L, 6L))
+            add(SonyProps.WB, 4, listOf(2L, 4L, 5L, 6L, SonyProps.WB_KELVIN))
+            add(SonyProps.KELVIN, 4, listOf(2800L, 3200L, 4300L, 5000L, 5600L, 6500L))
             out[SonyProps.REC_STATE] = Prop(SonyProps.REC_STATE, 4, 0x80, 1, simState[SonyProps.REC_STATE] ?: 0L, emptyList())
             out[SonyProps.BATTERY_STD] = Prop(SonyProps.BATTERY_STD, 2, 0, 0, simState[SonyProps.BATTERY_STD] ?: 30L, emptyList())
             out[SonyProps.MEDIA_TIME[0]] = Prop(SonyProps.MEDIA_TIME[0], 6, 0, 0, simState[SonyProps.MEDIA_TIME[0]] ?: 1500L, emptyList())
@@ -150,6 +155,7 @@ class SonyCam(
                 simState[SonyProps.EXP_MODE] = 1L
                 simState[SonyProps.METERING] = 0x8001L
                 simState[SonyProps.WB] = 2L
+                simState[SonyProps.KELVIN] = 5600L
                 simState[SonyProps.EXP_COMP] = 0L
                 simState[SonyProps.REC_STATE] = 0L
                 simState[SonyProps.BATTERY_STD] = 30L
@@ -426,10 +432,13 @@ class SonyCam(
             propsLogged = true
             say("Tabella proprieta': ${m.size} voci${if (r.complete) "" else " (lettura parziale)"}")
             say("Valori: " + m.values.joinToString(" ") { "${hex(it.code)}=${it.current.toString(16)}" })
-            for (code in intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE)) {
+            for (code in intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE, SonyProps.WB, SonyProps.KELVIN)) {
                 val p = m[code]
                 if (p == null) say("${hex(code)}: assente nella tabella")
                 else say("${hex(code)}: ${SonyProps.fmt(code, p.current)}, modificabile=${p.settable}, ${p.options.size} valori ammessi")
+            }
+            m[SonyProps.WB]?.let { w ->
+                say("WB ammessi (esadecimale): " + w.options.joinToString(" ") { java.lang.Long.toHexString(it) })
             }
         }
         // Dopo REC: mostra quali proprieta' sono cambiate, per controllare il codice dello stato di registrazione.
@@ -445,9 +454,34 @@ class SonyCam(
                 diffBase = null
             }
         }
+        val prev = lastMap
+        // REC fermato senza che Doppia l'abbia chiesto (caldo, scheda piena, batteria, tasto sulla camera): il log mostra cosa e' cambiato
+        val pr0 = prev[SonyProps.REC_STATE]?.current
+        if (pr0 != null && pr0 != 0L && m[SonyProps.REC_STATE]?.current == 0L && System.currentTimeMillis() - lastRecCmd > 15000L) {
+            val ch = m.values.filter { prev[it.code]?.current != it.current }
+            say("REC fermato dalla camera (non da Doppia). Proprieta' cambiate: " +
+                ch.joinToString(" ") { "${hex(it.code)} ${prev[it.code]?.current?.toString(16) ?: "-"}>${it.current.toString(16)}" })
+        }
+        // Proprieta' che non conosco e che cambiano: si scrivono nel log (poche righe) per scoprire i codici giusti (es. temperatura)
+        for (pr in m.values) {
+            if (pr.code in knownCodes) continue
+            val o = prev[pr.code]?.current ?: continue
+            if (o == pr.current) continue
+            val n = (unkCount[pr.code] ?: 0) + 1
+            unkCount[pr.code] = n
+            if (n <= 6) say("Proprieta' ${hex(pr.code)} cambiata: ${o.toString(16)} > ${pr.current.toString(16)}")
+        }
         lastMap = m
         onProps(m)
     }
+
+    private val unkCount = HashMap<Int, Int>()
+    private val knownCodes: Set<Int> = hashSetOf(
+        SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE, SonyProps.REC_BUTTON,
+        SonyProps.EXP_COMP, SonyProps.WB, SonyProps.KELVIN, SonyProps.EXP_MODE, SonyProps.METERING,
+        SonyProps.BATTERY_STD, SonyProps.BATTERY, 0xD221,
+        SonyProps.MEDIA_TIME[0], SonyProps.MEDIA_TIME[1], SonyProps.MEDIA_SHOTS[0], SonyProps.MEDIA_SHOTS[1]
+    )
 
     /** LiveView Dataset: offset+dimensione del JPEG nei primi 8 byte; se non tornano, cerca FF D8 ... FF D9. */
     private fun extractJpeg(d: ByteArray): ByteArray? {
