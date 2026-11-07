@@ -133,8 +133,8 @@ class SonyCam(
             add(SonyProps.KELVIN, 4, listOf(2800L, 3200L, 4300L, 5000L, 5600L, 6500L))
             out[SonyProps.REC_STATE] = Prop(SonyProps.REC_STATE, 4, 0x80, 1, simState[SonyProps.REC_STATE] ?: 0L, emptyList())
             out[SonyProps.BATTERY_STD] = Prop(SonyProps.BATTERY_STD, 2, 0, 0, simState[SonyProps.BATTERY_STD] ?: 30L, emptyList())
-            out[SonyProps.MEDIA_TIME[0]] = Prop(SonyProps.MEDIA_TIME[0], 6, 0, 0, simState[SonyProps.MEDIA_TIME[0]] ?: 1500L, emptyList())
-            out[SonyProps.MEDIA_TIME[1]] = Prop(SonyProps.MEDIA_TIME[1], 6, 0, 0, simState[SonyProps.MEDIA_TIME[1]] ?: 3600L, emptyList())
+            out[SonyProps.MEDIA_TIME[0]] = Prop(SonyProps.MEDIA_TIME[0], 6, 0, 1, simState[SonyProps.MEDIA_TIME[0]] ?: 1500L, emptyList())
+            out[SonyProps.MEDIA_TIME[1]] = Prop(SonyProps.MEDIA_TIME[1], 6, 0, 1, simState[SonyProps.MEDIA_TIME[1]] ?: 3600L, emptyList())
         }
         return out
     }
@@ -479,7 +479,7 @@ class SonyCam(
     private val knownCodes: Set<Int> = hashSetOf(
         SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE, SonyProps.REC_BUTTON,
         SonyProps.EXP_COMP, SonyProps.WB, SonyProps.KELVIN, SonyProps.EXP_MODE, SonyProps.METERING,
-        SonyProps.BATTERY_STD, SonyProps.BATTERY, 0xD221,
+        SonyProps.BATTERY_STD, SonyProps.BATTERY, SonyProps.BATTERY_PCT, 0xD221,
         SonyProps.MEDIA_TIME[0], SonyProps.MEDIA_TIME[1], SonyProps.MEDIA_SHOTS[0], SonyProps.MEDIA_SHOTS[1]
     )
 

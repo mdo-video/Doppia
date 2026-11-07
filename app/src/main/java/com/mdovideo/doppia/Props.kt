@@ -30,7 +30,8 @@ object SonyProps {
     const val EXP_MODE = 0x500E     // 1 M, 2 P, 3 A, 4 S
     const val METERING = 0x500B
     const val BATTERY_STD = 0x5001  // livello batteria standard PTP (0-100)
-    const val BATTERY = 0xD20E      // livello batteria Sony (da verificare nel log)
+    const val BATTERY = 0xD20E      // livello batteria Sony a gradini (solo ripiego)
+    const val BATTERY_PCT = 0xD218  // batteria in percentuale (int8, -1 = sconosciuto), verificata sul log
 
     /** Proprieta' Sony di avviso temperatura/surriscaldamento (da riempire quando il log mostra il codice giusto). */
     val TEMP_WARN = intArrayOf()
@@ -38,13 +39,14 @@ object SonyProps {
     fun overheat(m: Map<Int, Prop>): Boolean = TEMP_WARN.any { (m[it]?.current ?: 0L) != 0L }
 
     // Memoria residua (codici Sony da verificare nel log: se la camera non li espone si vede "—")
-    val MEDIA_TIME = intArrayOf(0xD249, 0xD24B)   // tempo residuo filmato, slot 1 e 2 (secondi)
+    val MEDIA_TIME = intArrayOf(0xD249, 0xD24A)   // tempo residuo filmato (secondi); D24A verificata sul log, D249 e' spenta se manca la scheda
     val MEDIA_SHOTS = intArrayOf(0xD248, 0xD24A)  // foto residue, slot 1 e 2
 
     /** Tempo residuo in secondi per slot, oppure null se non leggibile. */
     fun mediaSeconds(m: Map<Int, Prop>): List<Long?> = MEDIA_TIME.map { c ->
-        val v = m[c]?.current
-        if (v == null || v < 0 || v > 0xFFFFFL) null else v
+        val p = m[c]
+        // enabledFlag 0 = proprieta' spenta (scheda assente): non e' "0 minuti"
+        if (p == null || p.enabledFlag == 0 || p.current < 0 || p.current > 0xFFFFFL) null else p.current
     }
 
     /** Testo della memoria residua ("1h 12m", con due schede "1: 1h 12m  2: 40m"), oppure null se non leggibile. */
@@ -67,6 +69,8 @@ object SonyProps {
     fun batteryPercent(m: Map<Int, Prop>): Int? {
         val std = m[BATTERY_STD]
         if (std != null && std.current in 0L..100L) return std.current.toInt()
+        val pct = m[BATTERY_PCT]
+        if (pct != null && pct.current in 0L..100L) return pct.current.toInt()
         val son = m[BATTERY] ?: return null
         return when (son.current.toInt()) {
             0 -> 0
