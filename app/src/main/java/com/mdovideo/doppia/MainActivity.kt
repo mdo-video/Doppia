@@ -1506,7 +1506,13 @@ class MainActivity : AppCompatActivity() {
         bar.addView(setBtn, spaced(6))
         // in Ripresa spariscono: aggiornamento, Sync, segni piccoli (ci sono quelli grandi in basso), Impostazioni
         setupOnly.addAll(listOf<View>(updBtn, syncBtn, goodBtn, badBtn, noteBtn, setBtn))
-        root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // In verticale i tasti possono non starci tutti: la barra scorre di lato
+        val barScroll = HorizontalScrollView(this)
+        barScroll.isHorizontalScrollBarEnabled = false
+        barScroll.isFillViewport = true
+        barScroll.overScrollMode = View.OVER_SCROLL_NEVER
+        barScroll.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(barScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Area dei due riquadri, con il log sopra
         val stage = FrameLayout(this)
@@ -1533,10 +1539,9 @@ class MainActivity : AppCompatActivity() {
                 solo = if (solo == i) -1 else i
                 applyLayout()
             }
-            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-            if (i == 1) lp.leftMargin = dp(10)
-            tilesRow.addView(t, lp)
+            tilesRow.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         }
+        applyOrientation()
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         tiles[0].setSide(false)
         tiles[1].setSide(true)
@@ -1602,7 +1607,7 @@ class MainActivity : AppCompatActivity() {
         paintScene()
         setShootMode(prefs.getBoolean("shoot", false))
         rootView.postDelayed(alignRun, 500)
-        addLog("Doppia 1.6: Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
+        addLog("Doppia 1.8: Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -2050,7 +2055,7 @@ class MainActivity : AppCompatActivity() {
         dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
-        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.55f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     // ---------- Avvisi: vibrazione, suono, REC non allineato ----------
@@ -2290,7 +2295,7 @@ class MainActivity : AppCompatActivity() {
         dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
-        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.55f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     private fun camNames(): List<String> = listOf(camName(0), camName(1))
@@ -2388,6 +2393,31 @@ class MainActivity : AppCompatActivity() {
         val anyRec = live.any { tiles[it].recording }
         for (i in live) if (tiles[i].recording == anyRec) cams[i]?.toggleRec()
     }
+
+    private fun isPortrait(): Boolean =
+        resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+
+    /** Tablet in orizzontale: camere affiancate. In verticale: una sopra l'altra. */
+    private fun applyOrientation() {
+        val port = isPortrait()
+        tilesRow.orientation = if (port) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        for (i in 0..1) {
+            val lp = if (port) LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            if (i == 1) { if (port) lp.topMargin = dp(10) else lp.leftMargin = dp(10) }
+            tiles[i].layoutParams = lp
+        }
+        tilesRow.requestLayout()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyOrientation()
+    }
+
+    /** Larghezza dei dialoghi: in verticale quasi tutto lo schermo. */
+    private fun dlgWidth(landscapeFraction: Float): Int =
+        (resources.displayMetrics.widthPixels * (if (isPortrait()) 0.94f else landscapeFraction)).toInt()
 
     private fun applyLayout() {
         for (j in 0..1) tiles[j].visibility = if (solo == -1 || solo == j) View.VISIBLE else View.GONE
@@ -2600,7 +2630,7 @@ class MainActivity : AppCompatActivity() {
         settingsDlg = dlg
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
-        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.6f).toInt(), (resources.displayMetrics.heightPixels * 0.85f).toInt())
+        dlg.window?.setLayout(dlgWidth(0.6f), (resources.displayMetrics.heightPixels * 0.85f).toInt())
     }
 
     private val paramCodes = intArrayOf(SonyProps.EXP_MODE, SonyProps.EXP_COMP, SonyProps.METERING, SonyProps.WB, SonyProps.KELVIN)
