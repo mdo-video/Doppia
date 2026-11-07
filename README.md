@@ -51,6 +51,12 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
+## Novita' 1.4
+- **Modalità test (con PIN)**: Impostazioni > Modalità test > Camere simulate. La prima volta scegli un PIN di 4 cifre, poi lo chiede ogni volta. Con la modalità accesa, **Connetti** collega due camere finte (immagine con scritta TEST, zebra e peaking visibili, pallina in movimento) senza usare il Wi-Fi né gli IP.
+- Nella camera finta funzionano REC e stop (tally, take, segni, esportazione per Premiere), otturatore, diaframma, ISO, EV, bilanciamento bianco, Sync e screenshot. Cambiando ISO, diaframma, otturatore o EV la luminosità dell'immagine cambia davvero.
+- Batteria (parte dal 30%, -1% ogni 6 secondi) e memoria (-12 secondi ogni secondo in REC) scendono in fretta, per vedere i colori di avviso.
+- La modalità test si spegne da sola alla riapertura dell'app.
+
 ## Novita' 1.3
 - **Batteria e memoria sempre visibili**: sotto il nome di ogni camera, "🔋 78%   💾 1h 12m" (tempo di filmato residuo; con due schede, una per slot). Diventa giallo sotto il 25% di batteria o 20 minuti, rosso sotto il 10% o 10 minuti.
 - I codici Sony della memoria residua sono da verificare: se vedi "💾 —", copia il log in Impostazioni e correggo i codici.

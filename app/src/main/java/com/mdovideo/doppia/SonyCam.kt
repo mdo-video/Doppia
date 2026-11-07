@@ -17,7 +17,8 @@ class SonyCam(
     private val log: (String) -> Unit,
     private val onState: (CamState) -> Unit,
     private val onFrame: (Bitmap, Int) -> Unit,
-    private val onProps: (Map<Int, Prop>) -> Unit = {}
+    private val onProps: (Map<Int, Prop>) -> Unit = {},
+    private val sim: Boolean = false
 ) {
     @Volatile private var running = false
     private var thread: Thread? = null
@@ -31,6 +32,7 @@ class SonyCam(
 
     /** Imposta ISO / otturatore / diaframma con SDIO_SetExtDevicePropValue (0x9205). */
     fun setProp(p: Prop, value: Long) {
+        if (sim) { synchronized(simState) { simState[p.code] = value }; simDirty = true; say("TEST imposta ${hex(p.code)} = ${SonyProps.fmt(p.code, value)}"); return }
         cmds.add { c ->
             val r = c.transaction(0x9205, intArrayOf(p.code), SonyProps.toBytes(value, SonyProps.typeSize(p.type)))
             say("Imposta ${hex(p.code)} = ${SonyProps.fmt(p.code, value)} (0x${value.toString(16)}): ${hex(r.code)}")
@@ -58,6 +60,12 @@ class SonyCam(
      * due codici "toggle" delle camere piu' nuove) e dopo ciascuno controlla se lo stato REC e' cambiato davvero.
      */
     fun toggleRec() {
+        if (sim) {
+            synchronized(simState) { simState[SonyProps.REC_STATE] = if ((simState[SonyProps.REC_STATE] ?: 0L) == 0L) 1L else 0L }
+            say("TEST REC: ${if ((simState[SonyProps.REC_STATE] ?: 0L) != 0L) "avvio" else "stop"}")
+            simDirty = true
+            return
+        }
         cmds.add { c ->
             val before = lastMap[SonyProps.REC_STATE]?.current
             val start = (before ?: 0L) == 0L
@@ -98,10 +106,146 @@ class SonyCam(
         }
     }
 
+    // ---------- Modalita' test: camera finta ----------
+
+    private val simState = LinkedHashMap<Int, Long>()
+    @Volatile private var simDirty = false
+
+    private fun simProps(): Map<Int, Prop> {
+        fun sh(n: Int, d: Int) = (n.toLong() shl 16) or d.toLong()
+        val out = LinkedHashMap<Int, Prop>()
+        fun add(code: Int, type: Int, opts: List<Long>) {
+            val cur = simState[code] ?: opts.firstOrNull() ?: 0L
+            out[code] = Prop(code, type, 1, 1, cur, opts)
+        }
+        synchronized(simState) {
+            add(SonyProps.SHUTTER, 6, listOf(sh(1, 25), sh(1, 30), sh(1, 50), sh(1, 60), sh(1, 100), sh(1, 125), sh(1, 250), sh(1, 500), sh(1, 1000)))
+            add(SonyProps.APERTURE, 4, listOf(280L, 400L, 560L, 800L, 1100L, 1600L))
+            add(SonyProps.ISO, 6, listOf(100L, 200L, 400L, 800L, 1600L, 3200L, 6400L))
+            add(SonyProps.EXP_COMP, 3, listOf(-2000L, -1000L, 0L, 1000L, 2000L))
+            add(SonyProps.EXP_MODE, 4, listOf(1L, 2L, 3L, 4L))
+            add(SonyProps.METERING, 4, listOf(0x8001L, 0x8002L, 0x8004L))
+            add(SonyProps.WB, 4, listOf(2L, 4L, 5L, 6L))
+            out[SonyProps.REC_STATE] = Prop(SonyProps.REC_STATE, 4, 0x80, 1, simState[SonyProps.REC_STATE] ?: 0L, emptyList())
+            out[SonyProps.BATTERY_STD] = Prop(SonyProps.BATTERY_STD, 2, 0, 0, simState[SonyProps.BATTERY_STD] ?: 30L, emptyList())
+            out[SonyProps.MEDIA_TIME[0]] = Prop(SonyProps.MEDIA_TIME[0], 6, 0, 0, simState[SonyProps.MEDIA_TIME[0]] ?: 1500L, emptyList())
+            out[SonyProps.MEDIA_TIME[1]] = Prop(SonyProps.MEDIA_TIME[1], 6, 0, 0, simState[SonyProps.MEDIA_TIME[1]] ?: 3600L, emptyList())
+        }
+        return out
+    }
+
+    /** Camera finta: fotogrammi disegnati al momento, valori che si possono cambiare, REC, batteria e memoria che scendono in fretta. */
+    private fun simLoop() {
+        try {
+            onState(CamState.CONNECTING)
+            say("MODALITA' TEST: camera simulata, nessun collegamento reale")
+            Thread.sleep(600)
+            onState(CamState.WAITING)
+            Thread.sleep(600)
+            val isA = host.endsWith("0")
+            synchronized(simState) {
+                simState[SonyProps.SHUTTER] = (1L shl 16) or 50L
+                simState[SonyProps.APERTURE] = 400L
+                simState[SonyProps.ISO] = 800L
+                simState[SonyProps.EXP_MODE] = 1L
+                simState[SonyProps.METERING] = 0x8001L
+                simState[SonyProps.WB] = 2L
+                simState[SonyProps.EXP_COMP] = 0L
+                simState[SonyProps.REC_STATE] = 0L
+                simState[SonyProps.BATTERY_STD] = 30L
+                simState[SonyProps.MEDIA_TIME[0]] = 1500L
+                simState[SonyProps.MEDIA_TIME[1]] = 3600L
+            }
+            val w = 854
+            val h = 480
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            val t0 = System.currentTimeMillis()
+            var last = t0
+            var lastProps = 0L
+            var lastTick = t0
+            var frames = 0
+            val clock = java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT)
+            say("Camera simulata pronta")
+            while (running) {
+                val now = System.currentTimeMillis()
+                val fs = System.nanoTime()
+                // batteria e memoria scendono in fretta (batteria -1% ogni 6 s, memoria 12 s al secondo in REC)
+                if (now - lastTick >= 1000) {
+                    val dt = (now - lastTick) / 1000
+                    lastTick = now
+                    synchronized(simState) {
+                        if (now / 6000 != (now - dt * 1000) / 6000) simState[SonyProps.BATTERY_STD] = maxOf(3L, (simState[SonyProps.BATTERY_STD] ?: 30L) - 1)
+                        if ((simState[SonyProps.REC_STATE] ?: 0L) != 0L) {
+                            simState[SonyProps.MEDIA_TIME[0]] = maxOf(0L, (simState[SonyProps.MEDIA_TIME[0]] ?: 0L) - 12 * dt)
+                            simState[SonyProps.MEDIA_TIME[1]] = maxOf(0L, (simState[SonyProps.MEDIA_TIME[1]] ?: 0L) - 12 * dt)
+                        }
+                    }
+                }
+                // esposizione finta: ISO, diaframma, otturatore e compensazione cambiano la luminosita'
+                val (iso, ap, shv, ev) = synchronized(simState) {
+                    listOf(
+                        (simState[SonyProps.ISO] ?: 800L) and 0xffffffL,
+                        simState[SonyProps.APERTURE] ?: 400L,
+                        simState[SonyProps.SHUTTER] ?: ((1L shl 16) or 50L),
+                        simState[SonyProps.EXP_COMP] ?: 0L
+                    )
+                }
+                val shSec = ((shv shr 16) and 0xffff).toDouble() / maxOf(1L, shv and 0xffff).toDouble()
+                val fn = ap / 100.0
+                var k = (iso / 800.0) * (shSec / (1.0 / 50.0)) / ((fn / 4.0) * (fn / 4.0)) * Math.pow(2.0, ev / 1000.0)
+                k = k.coerceIn(0.05, 6.0)
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                val cv = android.graphics.Canvas(bmp)
+                fun lum(v: Int) = (v * k).toInt().coerceIn(0, 255)
+                // sfondo a gradiente (bianco a destra: fa scattare zebra e istogramma)
+                for (x in 0 until w step 6) {
+                    val g = lum(20 + 235 * x / w)
+                    paint.color = android.graphics.Color.rgb(if (isA) lum(g * 90 / 255 + 10) else g, if (isA) g else lum(g * 70 / 100), if (isA) lum(g * 120 / 100) else lum(g * 40 / 100))
+                    cv.drawRect(x.toFloat(), 0f, (x + 6).toFloat(), h.toFloat(), paint)
+                }
+                // zona a scacchi fitti (per il focus peaking)
+                for (yy in 0 until 8) for (xx in 0 until 16) {
+                    paint.color = if ((xx + yy) % 2 == 0) android.graphics.Color.rgb(lum(230), lum(230), lum(230)) else android.graphics.Color.rgb(lum(25), lum(25), lum(25))
+                    cv.drawRect((60 + xx * 10).toFloat(), (260 + yy * 10).toFloat(), (70 + xx * 10).toFloat(), (270 + yy * 10).toFloat(), paint)
+                }
+                // pallina che si muove
+                val ang = (now - t0) / 700.0
+                paint.color = android.graphics.Color.rgb(lum(255), lum(200), lum(40))
+                cv.drawCircle((w / 2 + Math.cos(ang) * 240).toFloat(), (h / 2 + Math.sin(ang * 1.3) * 120).toFloat(), 46f, paint)
+                // scritte
+                paint.color = android.graphics.Color.WHITE
+                paint.textSize = 64f
+                paint.isFakeBoldText = true
+                cv.drawText("TEST", 40f, 100f, paint)
+                paint.textSize = 30f
+                cv.drawText("$tag  ${clock.format(java.util.Date(now))}", 40f, 150f, paint)
+                frames++
+                val ms = ((System.nanoTime() - fs) / 1_000_000L).toInt() + 8
+                if (frames == 1) say("Primo fotogramma simulato: ${w}x$h")
+                onState(CamState.LIVE)
+                onFrame(bmp, ms)
+                if (simDirty || now - lastProps > 600) {
+                    simDirty = false
+                    lastProps = now
+                    val m = simProps()
+                    lastMap = m
+                    onProps(m)
+                }
+                val spent = (System.nanoTime() - fs) / 1_000_000L
+                Thread.sleep(maxOf(5L, 40L - spent))
+            }
+        } catch (e: InterruptedException) {
+        } catch (t: Throwable) {
+            if (running) { say("Errore simulazione: ${t.message ?: t.javaClass.simpleName}"); onState(CamState.ERROR) }
+        } finally {
+            running = false
+        }
+    }
+
     fun start() {
         if (running) return
         running = true
-        thread = Thread({ loop() }, "doppia-$tag").apply {
+        thread = Thread({ if (sim) simLoop() else loop() }, "doppia-$tag").apply {
             isDaemon = true
             start()
         }

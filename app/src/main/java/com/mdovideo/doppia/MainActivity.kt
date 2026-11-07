@@ -871,6 +871,8 @@ class MainActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("doppia", MODE_PRIVATE) }
     private val cams = arrayOfNulls<SonyCam>(2)
+    /** Modalita' test (camere finte): sempre spenta all'avvio, si accende in Impostazioni con il PIN. */
+    private var simOn = false
     private lateinit var tiles: Array<Tile>
     private lateinit var status: TextView
     private lateinit var logClose: MaterialButton
@@ -1657,6 +1659,24 @@ class MainActivity : AppCompatActivity() {
         ulp.topMargin = dp(6)
         col.addView(updCheck, ulp)
 
+        col.addView(sectionTitle("Modalità test"))
+        val testBtn = pillButton(if (simOn) "Camere simulate: ACCESE  ▸" else "Camere simulate (PIN)  ▸")
+        testBtn.setOnClickListener {
+            if (simOn) {
+                setSim(false)
+                testBtn.text = "Camere simulate (PIN)  ▸"
+            } else {
+                askPin { ok -> if (ok) { setSim(true); testBtn.text = "Camere simulate: ACCESE  ▸" } }
+            }
+        }
+        col.addView(testBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val testHint = TextView(this)
+        testHint.text = "Due camere finte con immagine, REC, valori, batteria e memoria che scendono in fretta. Si spegne da sola alla riapertura dell'app."
+        testHint.setTextColor(Pal.MUTED)
+        testHint.textSize = 13f
+        testHint.setPadding(0, dp(6), 0, 0)
+        col.addView(testHint)
+
         col.addView(sectionTitle("Diagnostica"))
         val copy = pillButton("Copia log e proprietà delle camere")
         copy.setOnClickListener { copyDiagnostics() }
@@ -1960,6 +1980,45 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Collegamento ----------
 
+    /** Accende o spegne le camere finte: ferma le camere in corso e le ricollega nel nuovo modo. */
+    private fun setSim(on: Boolean) {
+        if (on == simOn) return
+        for (i in 0..1) { cams[i]?.stop(); cams[i] = null }
+        simOn = on
+        addLog(if (on) "MODALITA' TEST accesa: camere simulate" else "Modalità test spenta")
+        Toast.makeText(this, if (on) "Modalità test: tocca Connetti sui riquadri" else "Modalità test spenta", Toast.LENGTH_LONG).show()
+    }
+
+    /** Chiede il PIN (la prima volta lo si sceglie, 4 cifre) e chiama done(true) se e' giusto. */
+    private fun askPin(done: (Boolean) -> Unit) {
+        val saved = prefs.getString("testpin", null)
+        val et = EditText(this)
+        et.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        et.filters = arrayOf(android.text.InputFilter.LengthFilter(4))
+        et.setTextColor(Pal.TEXT)
+        et.textSize = 24f
+        et.gravity = Gravity.CENTER
+        et.hint = "····"
+        et.setHintTextColor(Pal.MUTED)
+        val dlg = android.app.AlertDialog.Builder(this)
+            .setTitle(if (saved == null) "Scegli un PIN di 4 cifre" else "Inserisci il PIN")
+            .setView(et)
+            .setPositiveButton("OK") { _, _ ->
+                val v = et.text.toString()
+                if (saved == null) {
+                    if (v.length == 4) { prefs.edit().putString("testpin", v).apply(); done(true) }
+                    else { Toast.makeText(this, "Servono 4 cifre", Toast.LENGTH_SHORT).show(); done(false) }
+                } else if (v == saved) {
+                    done(true)
+                } else {
+                    Toast.makeText(this, "PIN sbagliato", Toast.LENGTH_SHORT).show(); done(false)
+                }
+            }
+            .setNegativeButton("Annulla") { _, _ -> done(false) }
+            .create()
+        dlg.show()
+    }
+
     private fun toggle(i: Int) {
         val running = cams[i]
         if (running != null) {
@@ -1967,8 +2026,8 @@ class MainActivity : AppCompatActivity() {
             cams[i] = null
             return
         }
-        val ip = (prefs.getString("ip$i", "") ?: "").trim()
-        if (!Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(ip)) {
+        val ip = if (simOn) "sim$i" else (prefs.getString("ip$i", "") ?: "").trim()
+        if (!simOn && !Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(ip)) {
             addLog("${camName(i)}: scrivi un indirizzo IP valido")
             tiles[i].showMessage("Inserisci l'indirizzo IP in Impostazioni")
             return
@@ -1981,7 +2040,8 @@ class MainActivity : AppCompatActivity() {
                 val a = Monitor.analyze(bmp)
                 runOnUiThread { tiles[i].setFrame(bmp, ms, a) }
             },
-            { m -> runOnUiThread { tiles[i].setProps(m); refreshSettings() } }
+            { m -> runOnUiThread { tiles[i].setProps(m); refreshSettings() } },
+            simOn
         )
         cams[i] = cam
         cam.start()
