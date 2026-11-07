@@ -471,12 +471,12 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         picker.visibility = View.GONE
         val pkLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         pkLp.gravity = Gravity.BOTTOM
-        pkLp.setMargins(dp(12), 0, dp(12), dp(88))
+        pkLp.setMargins(dp(12), 0, dp(12), dp(124))
         addView(picker, pkLp)
 
-        // Pulsanti a destra: screenshot (poi condividi) e sovrapposizione
-        side.orientation = LinearLayout.VERTICAL
-        side.gravity = Gravity.CENTER_HORIZONTAL
+        // Pulsanti piccoli sotto il live view, sopra la barra REC: screenshot (poi condividi) e sovrapposizione
+        side.orientation = LinearLayout.HORIZONTAL
+        side.gravity = Gravity.CENTER_VERTICAL
         side.visibility = View.GONE
         shotBtn.setOnClickListener {
             if (shotBtn.kind == IconButton.Kind.SHARE) {
@@ -491,13 +491,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlBtn.setOnClickListener {
             ovlPanel.visibility = if (ovlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        side.addView(shotBtn, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val ovlLp = LinearLayout.LayoutParams(dp(46), dp(46))
-        ovlLp.topMargin = dp(10)
+        side.addView(shotBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
+        val ovlLp = LinearLayout.LayoutParams(dp(34), dp(34))
+        ovlLp.leftMargin = dp(8)
         side.addView(ovlBtn, ovlLp)
         val sdLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        sdLp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        sdLp.rightMargin = dp(12)
+        sdLp.gravity = Gravity.BOTTOM or Gravity.END
+        sdLp.setMargins(dp(12), 0, dp(12), dp(78))
         addView(side, sdLp)
 
         // Pannello della sovrapposizione: cursore opacita' (50% di partenza) e scelta dell'immagine
@@ -553,9 +553,20 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         note.setPadding(0, dp(6), 0, 0)
         ovlPanel.addView(note)
         val pnLp = LayoutParams(dp(280), ViewGroup.LayoutParams.WRAP_CONTENT)
-        pnLp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        pnLp.rightMargin = dp(12 + 46 + 10)
+        pnLp.gravity = Gravity.BOTTOM or Gravity.END
+        pnLp.setMargins(dp(12), 0, dp(12), dp(78 + 34 + 8))
         addView(ovlPanel, pnLp)
+    }
+
+    /** Pulsanti screenshot e sovrapposizione dal lato esterno: a destra per il riquadro di destra, a sinistra per quello di sinistra. */
+    fun setSide(right: Boolean) {
+        val g = Gravity.BOTTOM or (if (right) Gravity.END else Gravity.START)
+        val a = side.layoutParams as LayoutParams
+        a.gravity = g
+        side.layoutParams = a
+        val b = ovlPanel.layoutParams as LayoutParams
+        b.gravity = g
+        ovlPanel.layoutParams = b
     }
 
     /** Ultimo fotogramma ricevuto (senza strumenti sopra), per lo screenshot. */
@@ -911,6 +922,8 @@ class MainActivity : AppCompatActivity() {
             tilesRow.addView(t, lp)
         }
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        tiles[0].setSide(false)
+        tiles[1].setSide(true)
         for (i in 0..1) {
             val f = overlayFile(i)
             val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
@@ -942,7 +955,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
         applyTally()
         refreshStatus()
-        addLog("Doppia 1.0: live, REC, esposizione, segni e take per Premiere, tally grande.")
+        addLog("Doppia 1.1: live, REC, esposizione, segni e take per Premiere, tally grande.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
