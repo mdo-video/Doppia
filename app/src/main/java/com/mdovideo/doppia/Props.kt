@@ -30,6 +30,22 @@ object SonyProps {
     const val BATTERY_STD = 0x5001  // livello batteria standard PTP (0-100)
     const val BATTERY = 0xD20E      // livello batteria Sony (da verificare nel log)
 
+    // Memoria residua (codici Sony da verificare nel log: se la camera non li espone si vede "—")
+    val MEDIA_TIME = intArrayOf(0xD249, 0xD24B)   // tempo residuo filmato, slot 1 e 2 (secondi)
+    val MEDIA_SHOTS = intArrayOf(0xD248, 0xD24A)  // foto residue, slot 1 e 2
+
+    /** Tempo residuo in secondi per slot, oppure null se non leggibile. */
+    fun mediaSeconds(m: Map<Int, Prop>): List<Long?> = MEDIA_TIME.map { c ->
+        val v = m[c]?.current
+        if (v == null || v < 0 || v > 0xFFFFFL) null else v
+    }
+
+    fun fmtRemain(sec: Long): String {
+        val h = sec / 3600
+        val mi = (sec % 3600) / 60
+        return if (h > 0) "${h}h ${mi}m" else "${mi}m"
+    }
+
     /** Livello batteria in percentuale approssimata, oppure null se la camera non lo espone in modo riconoscibile. */
     fun batteryPercent(m: Map<Int, Prop>): Int? {
         val std = m[BATTERY_STD]

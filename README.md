@@ -51,6 +51,10 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
+## Novita' 1.3
+- **Batteria e memoria sempre visibili**: sotto il nome di ogni camera, "🔋 78%   💾 1h 12m" (tempo di filmato residuo; con due schede, una per slot). Diventa giallo sotto il 25% di batteria o 20 minuti, rosso sotto il 10% o 10 minuti.
+- I codici Sony della memoria residua sono da verificare: se vedi "💾 —", copia il log in Impostazioni e correggo i codici.
+
 ## Novita' 1.2
 - **Guide inquadratura per i social**: Impostazioni > Monitor. Accendi in piu' alla volta **9:16** (Reel, TikTok, Shorts), **4:5** (feed Instagram), **1:1**, **16:9** e **2.39:1**: ogni guida e' un ritaglio centrato sull'immagine, con il suo colore e il suo nome. In piu' la **zona sicura 9:16** (valori approssimati) tiene titoli e testi lontani da dove le app social mettono didascalie e pulsanti. Gli screenshot restano puliti, senza guide.
 

@@ -433,8 +433,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         tp.setMargins(dp(12), dp(12), 0, 0)
         addView(tag, tp)
 
-        // Avviso batteria scarica, sotto il nome
-        batt.textSize = 13f
+        // Batteria e memoria residua, sotto il nome
+        batt.textSize = 15f
         batt.typeface = Typeface.DEFAULT_BOLD
         batt.setPadding(dp(10), dp(4), dp(10), dp(4))
         batt.background = roundBg(0xCC0B0F15.toInt(), 12, ctx)
@@ -761,13 +761,18 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             if (p == null || !p.settable) closePicker() else highlight(p.current, false)
         }
         val bl = SonyProps.batteryPercent(m)
-        if (bl != null && bl <= 25) {
-            batt.text = "🔋 $bl%"
-            batt.setTextColor(if (bl <= 10) 0xFFEF5350.toInt() else Pal.MID)
-            batt.visibility = View.VISIBLE
-        } else {
-            batt.visibility = View.GONE
-        }
+        val mem = SonyProps.mediaSeconds(m)
+        val parts = ArrayList<String>()
+        parts.add(if (bl != null) "🔋 $bl%" else "🔋 —")
+        val valid = mem.filterNotNull()
+        if (valid.isEmpty()) parts.add("💾 —")
+        else parts.add("💾 " + mem.mapIndexedNotNull { i, s -> if (s == null) null else (if (mem.size > 1 && valid.size > 1) "${i + 1}: " else "") + SonyProps.fmtRemain(s) }.joinToString("  "))
+        batt.text = parts.joinToString("   ")
+        val lowBat = bl != null && bl <= 10
+        val lowMem = valid.isNotEmpty() && valid.minOrNull()!! < 600
+        val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.minOrNull()!! < 1200)
+        batt.setTextColor(if (lowBat || lowMem) 0xFFEF5350.toInt() else if (warn) Pal.MID else Pal.TEXT)
+        batt.visibility = View.VISIBLE
         val r = (m[SonyProps.REC_STATE]?.current ?: 0L) != 0L
         if (r != recording) {
             recording = r
