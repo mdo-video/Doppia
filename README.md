@@ -51,6 +51,17 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
+## Novita' 1.5
+- **Guide spostabili**: con le guide accese compare sotto la batteria una barra con il lucchetto. Le guide partono **bloccate**. Tocca 🔓 per sbloccarle: la guida scelta (con ↔ o ↕ nel nome) si trascina con un dito. Quelle verticali (9:16, 4:5, 1:1) si spostano a destra e sinistra, la 2.39:1 in alto e in basso.
+- **Più guide accese**: tocca il nome di una guida per sceglierla, poi trascinala.
+- **Aggancio**: vicino al centro e ai bordi la guida si ferma da sola, con un piccolo tic. Doppio tocco dentro la guida: torna al centro. Durante il trascinamento compare la linea del centro e la posizione in percento.
+- **Posizioni rapide**: con le guide sbloccate, tre pulsanti ◀ ● ▶ (▲ ● ▼ per la 2.39:1) portano la guida a sinistra, al centro, a destra.
+- **Una posizione per camera**: A e B ricordano ognuna le sue guide. Impostazioni > Monitor: **Copia posizione guide A → B** e **Rimetti tutte le guide al centro**.
+- **Valore sempre visibile**: nella barra, per esempio "9:16 · 12% a sinistra".
+- **Durante il REC le guide sono sempre bloccate** (lucchetto "REC").
+- **Guide nei take**: ogni take salva la posizione delle guide accese all'inizio. Nell'esportazione `.json` c'e' l'elenco "guides" per ogni take, nel `.csv` la colonna "guide". Nell'XML per Premiere non e' inserita.
+- La zona sicura 9:16 segue la guida 9:16.
+
 ## Novita' 1.4
 - **Modalità test (con PIN)**: Impostazioni > Modalità test > Camere simulate. La prima volta scegli un PIN di 4 cifre, poi lo chiede ogni volta. Con la modalità accesa, **Connetti** collega due camere finte (immagine con scritta TEST, zebra e peaking visibili, pallina in movimento) senza usare il Wi-Fi né gli IP.
 - Nella camera finta funzionano REC e stop (tally, take, segni, esportazione per Premiere), otturatore, diaframma, ISO, EV, bilanciamento bianco, Sync e screenshot. Cambiando ISO, diaframma, otturatore o EV la luminosità dell'immagine cambia davvero.

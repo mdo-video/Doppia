@@ -180,6 +180,12 @@ class GuidesView(ctx: Context) : View(ctx) {
     var aspect = 16f / 9f
     var mask = 0
     var safe = false
+    var cam = 0
+    var locked = true
+    var selected = 0
+    /** Chiamata quando cambia la guida scelta o la sua posizione; il secondo valore e' true a fine gesto. */
+    var onMove: ((Int, Boolean) -> Unit)? = null
+
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = ctx.dp(2).toFloat()
@@ -195,40 +201,171 @@ class GuidesView(ctx: Context) : View(ctx) {
         typeface = Typeface.DEFAULT_BOLD
         setShadowLayer(ctx.dp(2).toFloat(), 0f, 0f, 0xFF000000.toInt())
     }
+    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = ctx.dp(22).toFloat()
+        typeface = Typeface.DEFAULT_BOLD
+        color = 0xFFFFFFFF.toInt()
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(ctx.dp(3).toFloat(), 0f, 0f, 0xFF000000.toInt())
+    }
 
-    override fun onDraw(c: Canvas) {
+    private var il = 0f
+    private var itop = 0f
+    private var iw = 0f
+    private var ih = 0f
+    private val bx = FloatArray(6)
+
+    private fun geom() {
         val w = width.toFloat()
         val h = height.toFloat()
-        var iw = w
-        var ih = w / aspect
+        iw = w
+        ih = w / aspect
         if (ih > h) { ih = h; iw = h * aspect }
-        val l = (w - iw) / 2f
-        val t = (h - ih) / 2f
+        il = (w - iw) / 2f
+        itop = (h - ih) / 2f
+    }
+
+    /** bx = sinistra, alto, destra, basso, margine di movimento in x e in y. */
+    private fun box(k: Int) {
+        val a = Guides.ratios[k]
+        var gw = iw
+        var gh = iw / a
+        if (gh > ih) { gh = ih; gw = ih * a }
+        val tx = (iw - gw) / 2f
+        val ty = (ih - gh) / 2f
+        val vertical = ty > tx
+        val p = Guides.pos[cam.coerceIn(0, 1)][k]
+        val gl = il + tx + (if (vertical) 0f else p * tx)
+        val gt = itop + ty + (if (vertical) p * ty else 0f)
+        bx[0] = gl; bx[1] = gt; bx[2] = gl + gw; bx[3] = gt + gh; bx[4] = tx; bx[5] = ty
+    }
+
+    /** La guida scelta per essere spostata (la prima accesa se quella scelta e' spenta); -1 se nessuna. */
+    fun selActive(): Int {
+        if (selected in Guides.names.indices && (mask and (1 shl selected)) != 0) return selected
+        for (k in Guides.names.indices) if ((mask and (1 shl k)) != 0) { selected = k; return k }
+        return -1
+    }
+
+    private var dragK = -1
+    private var dragX = 0f
+    private var dragY = 0f
+    private var dragStart = 0f
+    private var snapped = false
+
+    private val gd = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: android.view.MotionEvent): Boolean = true
+        override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+            if (locked) return false
+            val k = selActive()
+            if (k < 0) return false
+            geom(); box(k)
+            if (e.x in bx[0]..bx[2] && e.y in bx[1]..bx[3]) {
+                Guides.pos[cam.coerceIn(0, 1)][k] = 0f
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                invalidate()
+                onMove?.invoke(k, true)
+                return true
+            }
+            return false
+        }
+    })
+
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (locked || mask == 0 || width == 0) return false
+        gd.onTouchEvent(e)
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                geom()
+                // tocco sul nome di una guida: la sceglie
+                for (k in Guides.names.indices) {
+                    if ((mask and (1 shl k)) == 0) continue
+                    box(k)
+                    if (e.x in bx[0]..(bx[0] + dp(84)) && e.y in bx[1]..(bx[1] + dp(30))) {
+                        selected = k
+                        invalidate()
+                        onMove?.invoke(k, false)
+                        return true
+                    }
+                }
+                val k = selActive()
+                if (k < 0) return false
+                box(k)
+                if (e.x in bx[0]..bx[2] && e.y in bx[1]..bx[3]) {
+                    dragK = k
+                    dragX = e.x
+                    dragY = e.y
+                    dragStart = Guides.pos[cam.coerceIn(0, 1)][k]
+                    snapped = false
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+                return false
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (dragK < 0) return false
+                box(dragK)
+                val vertical = Guides.axisVertical(dragK, aspect)
+                val travel = if (vertical) bx[5] else bx[4]
+                if (travel < 1f) return true
+                val d = if (vertical) e.y - dragY else e.x - dragX
+                var p = (dragStart + d / travel).coerceIn(-1f, 1f)
+                var snap = false
+                if (Math.abs(p) < 0.05f) { p = 0f; snap = true }
+                else if (Math.abs(p) > 0.96f) { p = if (p < 0) -1f else 1f; snap = true }
+                if (snap && !snapped) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                snapped = snap
+                Guides.pos[cam.coerceIn(0, 1)][dragK] = p
+                invalidate()
+                onMove?.invoke(dragK, false)
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (dragK >= 0) {
+                    val k = dragK
+                    dragK = -1
+                    invalidate()
+                    onMove?.invoke(k, true)
+                    return true
+                }
+                return false
+            }
+        }
+        return dragK >= 0
+    }
+
+    override fun onDraw(c: Canvas) {
+        geom()
+        val sel = if (locked) -1 else selActive()
         for (k in Guides.names.indices) {
             if ((mask and (1 shl k)) == 0) continue
-            val a = Guides.ratios[k]
-            var gw = iw
-            var gh = iw / a
-            if (gh > ih) { gh = ih; gw = ih * a }
-            val gl = l + (iw - gw) / 2f
-            val gt = t + (ih - gh) / 2f
+            box(k)
             line.color = Guides.colors[k]
-            c.drawRect(gl, gt, gl + gw, gt + gh, line)
+            line.strokeWidth = dp(if (k == sel) 4 else 2).toFloat()
+            c.drawRect(bx[0], bx[1], bx[2], bx[3], line)
             txt.color = Guides.colors[k]
-            c.drawText(Guides.names[k], gl + dp(6), gt + dp(16), txt)
+            val vert = Guides.axisVertical(k, aspect)
+            val mark = if (k == sel) (if (vert) " ↕" else " ↔") else ""
+            c.drawText(Guides.names[k] + mark, bx[0] + dp(6), bx[1] + dp(16), txt)
+        }
+        if (dragK >= 0) {
+            // durante il trascinamento: linea del centro dell'immagine e posizione in percento
+            val cx = il + iw / 2f
+            val cy = itop + ih / 2f
+            if (Guides.axisVertical(dragK, aspect)) c.drawLine(il, cy, il + iw, cy, dash) else c.drawLine(cx, itop, cx, itop + ih, dash)
+            box(dragK)
+            val p = Guides.pos[cam.coerceIn(0, 1)][dragK]
+            c.drawText(Guides.names[dragK] + "  " + Guides.describe(p, Guides.axisVertical(dragK, aspect)), (bx[0] + bx[2]) / 2f, (bx[1] + bx[3]) / 2f, big)
         }
         if (safe) {
-            // zona sicura 9:16: lontano da titoli in alto, didascalie in basso e pulsanti a destra (valori approssimati)
-            val a = Guides.ratios[0]
-            var gw = iw
-            var gh = iw / a
-            if (gh > ih) { gh = ih; gw = ih * a }
-            val gl = l + (iw - gw) / 2f
-            val gt = t + (ih - gh) / 2f
-            val sl = gl + gw * 0.06f
-            val sr = gl + gw * 0.86f
-            val st = gt + gh * 0.12f
-            val sb = gt + gh * 0.78f
+            // zona sicura 9:16: segue la guida 9:16 (valori approssimati)
+            box(0)
+            val gw = bx[2] - bx[0]
+            val gh = bx[3] - bx[1]
+            val sl = bx[0] + gw * 0.06f
+            val sr = bx[0] + gw * 0.86f
+            val st = bx[1] + gh * 0.12f
+            val sb = bx[1] + gh * 0.78f
             c.drawRect(sl, st, sr, sb, dash)
             txt.color = 0xCCFFFFFF.toInt()
             c.drawText("zona sicura", sl + dp(6), st + dp(16), txt)
@@ -295,6 +432,16 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val peakImg = ImageView(ctx)
     private val gridV = GridView(ctx)
     private val guideV = GuidesView(ctx)
+    private val guideBar = LinearLayout(ctx)
+    private val glock = TextView(ctx)
+    private val gleft = TextView(ctx)
+    private val gcenter = TextView(ctx)
+    private val gright = TextView(ctx)
+    private val ginfo = TextView(ctx)
+    /** Indice della camera (0 = A, 1 = B): ogni camera ricorda la posizione delle sue guide. */
+    var cam = 0
+        set(v) { field = v; guideV.cam = v }
+    var onGuideSave: (() -> Unit)? = null
     private val tag = TextView(ctx)
     private val lag = TextView(ctx)
     private val empty = TextView(ctx)
@@ -443,6 +590,55 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         bp.gravity = Gravity.TOP or Gravity.START
         bp.setMargins(dp(12), dp(52), 0, 0)
         addView(batt, bp)
+
+
+        // Barra guide (sotto la batteria): lucchetto, tre posizioni rapide e valore
+        guideBar.orientation = LinearLayout.HORIZONTAL
+        guideBar.gravity = Gravity.CENTER_VERTICAL
+        guideBar.visibility = View.GONE
+        fun gbtn(t: TextView, text: String) {
+            t.text = text
+            t.textSize = 16f
+            t.setTextColor(Pal.TEXT)
+            t.gravity = Gravity.CENTER
+            t.typeface = Typeface.DEFAULT_BOLD
+            t.background = roundBg(0xCC0B0F15.toInt(), 14, ctx)
+            t.setPadding(dp(12), dp(7), dp(12), dp(7))
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.rightMargin = dp(6)
+            guideBar.addView(t, lp)
+        }
+        gbtn(glock, "🔒")
+        gbtn(gleft, "◀")
+        gbtn(gcenter, "●")
+        gbtn(gright, "▶")
+        gbtn(ginfo, "")
+        ginfo.textSize = 13f
+        glock.setOnClickListener {
+            if (recording) return@setOnClickListener
+            Monitor.guideLock = !Monitor.guideLock
+            updateGuideBar()
+            onGuideSave?.invoke()
+        }
+        fun setGuidePos(v: Float) {
+            val k = guideV.selActive()
+            if (k < 0 || guideV.locked) return
+            Guides.pos[cam.coerceIn(0, 1)][k] = v
+            guideV.invalidate()
+            updateGuideBar()
+            onGuideSave?.invoke()
+        }
+        gleft.setOnClickListener { setGuidePos(-1f) }
+        gcenter.setOnClickListener { setGuidePos(0f) }
+        gright.setOnClickListener { setGuidePos(1f) }
+        guideV.onMove = { _, done ->
+            updateGuideBar()
+            if (done) onGuideSave?.invoke()
+        }
+        val gbp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        gbp.gravity = Gravity.TOP or Gravity.START
+        gbp.setMargins(dp(12), dp(92), 0, 0)
+        addView(guideBar, gbp)
 
         lag.setTextColor(Pal.TEXT)
         lag.textSize = 12f
@@ -675,6 +871,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         guideV.mask = Monitor.guides
         guideV.safe = Monitor.safe
         guideV.visibility = if (Monitor.guides != 0 || Monitor.safe) View.VISIBLE else View.GONE
+        updateGuideBar()
         guideV.invalidate()
 
         val z = a?.zebra
@@ -745,6 +942,36 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
+
+    /** Aggiorna la barra guide: lucchetto, pulsanti di posizione e testo con la posizione della guida scelta. */
+    private fun updateGuideBar() {
+        if (Monitor.guides == 0 || !hasFrame) {
+            guideBar.visibility = View.GONE
+            guideV.locked = true
+            return
+        }
+        guideBar.visibility = View.VISIBLE
+        val locked = Monitor.guideLock || recording
+        guideV.locked = locked
+        glock.text = if (recording) "🔒 REC" else if (locked) "🔒" else "🔓"
+        val k = guideV.selActive()
+        val vert = k >= 0 && Guides.axisVertical(k, guideV.aspect)
+        val vis = if (!locked && k >= 0) View.VISIBLE else View.GONE
+        gleft.visibility = vis
+        gcenter.visibility = vis
+        gright.visibility = vis
+        gleft.text = if (vert) "▲" else "◀"
+        gright.text = if (vert) "▼" else "▶"
+        val info = if (k < 0) "" else Guides.names[k] + " · " + Guides.describe(Guides.pos[cam.coerceIn(0, 1)][k], vert)
+        if (ginfo.text.toString() != info) ginfo.text = info
+        ginfo.visibility = if (k < 0) View.GONE else View.VISIBLE
+    }
+
+    fun refreshGuides() { guideV.invalidate(); updateGuideBar() }
+
+    /** Proporzioni dell'ultimo fotogramma (per salvare la posizione delle guide nei take). */
+    fun frameAspect(): Float = guideV.aspect
+
     /** Aggiorna valori, stato REC e pulsanti con la tabella proprieta' appena letta dalla camera. */
     fun setProps(m: Map<Int, Prop>) {
         props = m
@@ -788,6 +1015,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
                 recPill.visibility = View.GONE
                 removeCallbacks(ticker)
             }
+            updateGuideBar()
             onRecChange?.invoke(r)
         }
     }
@@ -847,6 +1075,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         peakImg.visibility = View.GONE
         gridV.visibility = View.GONE
         guideV.visibility = View.GONE
+        guideBar.visibility = View.GONE
         histV.visibility = View.GONE
         meterBox.visibility = View.GONE
         lag.visibility = View.GONE
@@ -980,6 +1209,8 @@ class MainActivity : AppCompatActivity() {
         tiles = arrayOf(Tile(this, camName(0), Pal.COLD), Tile(this, camName(1), Pal.HOT))
         for (i in 0..1) {
             val t = tiles[i]
+            t.cam = i
+            t.onGuideSave = { Monitor.save(prefs) }
             t.onConnect = { toggle(i) }
             t.onShot = { takeShot(i) }
             t.onShare = { shareShot(i) }
@@ -1346,7 +1577,12 @@ class MainActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         if (r) {
             val t = Session.startTake(i, now - lag)
-            addLog("${camName(i)}: take ${t.num} avviato")
+            if (Monitor.guides != 0) {
+                val g = Guides.snapshot(i, Monitor.guides, tiles[i].frameAspect())
+                t.gj = g.first
+                t.gt = g.second
+            }
+            addLog("${camName(i)}: take ${t.num} avviato" + (if (t.gt.isNotEmpty()) " (guide: ${t.gt})" else ""))
         } else {
             val t = Session.openTake(i)
             Session.closeTake(i, now)
@@ -1570,7 +1806,25 @@ class MainActivity : AppCompatActivity() {
         col.addView(multiRow("Guide inquadratura (tocca per accendere)", Guides.names.toList(), Monitor.guides) {
             Monitor.guides = it; Monitor.save(prefs)
         })
-        col.addView(toggleRow("Zona sicura 9:16 (approssimata)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
+        col.addView(toggleRow("Guide bloccate (si spostano solo dopo aver aperto il lucchetto sul riquadro)", Monitor.guideLock) { Monitor.guideLock = it; Monitor.save(prefs) })
+        val gcopy = pillButton("Copia posizione guide: A → B")
+        gcopy.setOnClickListener {
+            for (k in Guides.names.indices) Guides.pos[1][k] = Guides.pos[0][k]
+            Monitor.save(prefs)
+            for (t in tiles) t.refreshGuides()
+            Toast.makeText(this, "Guide di B uguali a quelle di A", Toast.LENGTH_SHORT).show()
+        }
+        col.addView(gcopy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val gcenter = pillButton("Rimetti tutte le guide al centro")
+        gcenter.setOnClickListener {
+            for (c in 0..1) for (k in Guides.names.indices) Guides.pos[c][k] = 0f
+            Monitor.save(prefs)
+            for (t in tiles) t.refreshGuides()
+        }
+        val gcl = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        gcl.topMargin = dp(8)
+        col.addView(gcenter, gcl)
+        col.addView(toggleRow("Zona sicura 9:16 (approssimata, segue la guida 9:16)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
         col.addView(toggleRow("Istogramma", Monitor.histogram) { Monitor.histogram = it; Monitor.save(prefs) })
         col.addView(toggleRow("Esposimetro (stimato dall'immagine)", Monitor.meter) { Monitor.meter = it; Monitor.save(prefs) })
 

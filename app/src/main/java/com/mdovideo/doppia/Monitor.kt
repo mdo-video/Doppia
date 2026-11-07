@@ -11,6 +11,53 @@ object Guides {
     val names = arrayOf("9:16", "4:5", "1:1", "16:9", "2.39:1")
     val ratios = floatArrayOf(9f / 16f, 4f / 5f, 1f, 16f / 9f, 2.39f)
     val colors = intArrayOf(0xFFFFC107.toInt(), 0xFF4FC3F7.toInt(), 0xFF81C784.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF7043.toInt())
+
+    /** Posizione di ogni guida per camera: -1 = tutto a sinistra (o in alto), 0 = centro, 1 = tutto a destra (o in basso). */
+    val pos = Array(2) { FloatArray(5) }
+
+    /** Una guida piu' larga dell'immagine (es. 2.39:1 su 16:9) si muove in verticale, le altre in orizzontale. */
+    fun axisVertical(k: Int, aspect: Float): Boolean {
+        val a = ratios[k]
+        val ih = 1f / aspect
+        var gw = 1f
+        var gh = 1f / a
+        if (gh > ih) { gh = ih; gw = ih * a }
+        return (ih - gh) / 2f > (1f - gw) / 2f
+    }
+
+    fun describe(p: Float, vertical: Boolean): String {
+        val pct = Math.round(Math.abs(p) * 100f)
+        if (pct == 0) return "centro"
+        return if (vertical) (if (p < 0) "$pct% in alto" else "$pct% in basso")
+        else (if (p < 0) "$pct% a sinistra" else "$pct% a destra")
+    }
+
+    /** Fotografia delle guide accese di una camera: (json, testo). */
+    fun snapshot(cam: Int, mask: Int, aspect: Float): Pair<String, String> {
+        val arr = org.json.JSONArray()
+        val parts = ArrayList<String>()
+        for (k in names.indices) {
+            if ((mask and (1 shl k)) == 0) continue
+            val v = axisVertical(k, aspect)
+            val p = pos[cam.coerceIn(0, 1)][k]
+            val o = org.json.JSONObject()
+            o.put("guide", names[k])
+            o.put("pos", Math.round(p * 1000f) / 1000f.toDouble())
+            o.put("axis", if (v) "y" else "x")
+            o.put("text", describe(p, v))
+            arr.put(o)
+            parts.add(names[k] + " " + describe(p, v))
+        }
+        return Pair(arr.toString(), parts.joinToString(" | "))
+    }
+
+    fun load(p: SharedPreferences) {
+        for (c in 0..1) for (k in names.indices) pos[c][k] = p.getFloat("gpos_${c}_$k", 0f).coerceIn(-1f, 1f)
+    }
+
+    fun save(e: SharedPreferences.Editor) {
+        for (c in 0..1) for (k in names.indices) e.putFloat("gpos_${c}_$k", pos[c][k])
+    }
 }
 
 /** Strumenti del monitor (come Monitor+): impostazioni condivise dalle due camere. */
@@ -24,6 +71,7 @@ object Monitor {
     @Volatile var meter = true
     @Volatile var guides = 0             // bit k acceso = guida Guides.names[k] visibile
     @Volatile var safe = false           // zona sicura 9:16
+    @Volatile var guideLock = true       // guide bloccate (non si spostano)
 
     fun load(p: SharedPreferences) {
         zebra = p.getBoolean("mon_zebra", false)
@@ -35,6 +83,8 @@ object Monitor {
         meter = p.getBoolean("mon_meter", true)
         guides = p.getInt("mon_guides", 0)
         safe = p.getBoolean("mon_safe", false)
+        guideLock = p.getBoolean("mon_glock", true)
+        Guides.load(p)
     }
 
     fun save(p: SharedPreferences) {
@@ -43,6 +93,8 @@ object Monitor {
             .putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
             .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter)
             .putInt("mon_guides", guides).putBoolean("mon_safe", safe)
+            .putBoolean("mon_glock", guideLock)
+            .also { Guides.save(it) }
             .apply()
     }
 

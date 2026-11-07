@@ -18,7 +18,11 @@ object MarkCat {
 }
 
 /** Una registrazione di una camera. endWall = 0 finche' sta registrando. */
-class Take(val cam: Int, val num: Int, val startWall: Long, var endWall: Long)
+class Take(val cam: Int, val num: Int, val startWall: Long, var endWall: Long) {
+    /** Guide di inquadratura accese all'inizio del take: json e testo (vuoti se nessuna). */
+    var gj: String = ""
+    var gt: String = ""
+}
 
 /** Riferimento di un segno a un take: quanti ms dopo l'inizio del take. */
 class Ref(val cam: Int, val take: Int, val offMs: Long)
@@ -60,7 +64,10 @@ object Session {
             val ta = j.optJSONArray("takes") ?: JSONArray()
             for (k in 0 until ta.length()) {
                 val o = ta.getJSONObject(k)
-                takes.add(Take(o.getInt("c").coerceIn(0, 1), o.getInt("n"), o.getLong("s"), o.getLong("e")))
+                val tk = Take(o.getInt("c").coerceIn(0, 1), o.getInt("n"), o.getLong("s"), o.getLong("e"))
+                tk.gj = o.optString("gj", "")
+                tk.gt = o.optString("gt", "")
+                takes.add(tk)
             }
             val ma = j.optJSONArray("marks") ?: JSONArray()
             for (k in 0 until ma.length()) {
@@ -97,6 +104,7 @@ object Session {
             o.put("n", t.num)
             o.put("s", t.startWall)
             o.put("e", t.endWall)
+            if (t.gj.isNotEmpty()) { o.put("gj", t.gj); o.put("gt", t.gt) }
             ta.put(o)
         }
         j.put("takes", ta)
@@ -242,6 +250,9 @@ object Session {
             x.put("start", iso(t.startWall))
             x.put("startMs", t.startWall)
             x.put("durationMs", durMs(t))
+            if (t.gj.isNotEmpty()) {
+                try { x.put("guides", JSONArray(t.gj)) } catch (_: Exception) {}
+            }
             ta.put(x)
         }
         o.put("takes", ta)
@@ -275,7 +286,7 @@ object Session {
     /** Elenco take in CSV (separatore ;, UTF-8 con BOM: si apre bene in Excel italiano). */
     fun csv(names: List<String>): String {
         val sb = StringBuilder("\uFEFF")
-        sb.append("camera;take;inizio;fine;durata;segni;note\n")
+        sb.append("camera;take;inizio;fine;durata;segni;note;guide\n")
         for (t in takes) {
             val mk = marksOf(t)
             val parts = mk.joinToString(" | ") { pr ->
@@ -287,7 +298,8 @@ object Session {
                 .append(if (t.endWall == 0L) "" else clockOf(t.endWall)).append(';')
                 .append(hms(durMs(t))).append(';')
                 .append(mk.size).append(';')
-                .append(csvf(parts)).append('\n')
+                .append(csvf(parts)).append(';')
+                .append(csvf(t.gt)).append('\n')
         }
         return sb.toString()
     }
