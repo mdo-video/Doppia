@@ -6,6 +6,13 @@ import android.graphics.Bitmap
 /** Risultato dell'analisi di un fotogramma: istogramma, esposizione media e maschere per zebra / peaking. */
 class Analysis(val hist: IntArray?, val ev: Float, val zebra: Bitmap?, val peaking: Bitmap?)
 
+/** Guide di inquadratura: rapporti, nomi e colori (ritagli centrati sull'immagine). */
+object Guides {
+    val names = arrayOf("9:16", "4:5", "1:1", "16:9", "2.39:1")
+    val ratios = floatArrayOf(9f / 16f, 4f / 5f, 1f, 16f / 9f, 2.39f)
+    val colors = intArrayOf(0xFFFFC107.toInt(), 0xFF4FC3F7.toInt(), 0xFF81C784.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF7043.toInt())
+}
+
 /** Strumenti del monitor (come Monitor+): impostazioni condivise dalle due camere. */
 object Monitor {
     @Volatile var zebra = false
@@ -15,6 +22,8 @@ object Monitor {
     @Volatile var grid = false
     @Volatile var histogram = true
     @Volatile var meter = true
+    @Volatile var guides = 0             // bit k acceso = guida Guides.names[k] visibile
+    @Volatile var safe = false           // zona sicura 9:16
 
     fun load(p: SharedPreferences) {
         zebra = p.getBoolean("mon_zebra", false)
@@ -24,6 +33,8 @@ object Monitor {
         grid = p.getBoolean("mon_grid", false)
         histogram = p.getBoolean("mon_hist", true)
         meter = p.getBoolean("mon_meter", true)
+        guides = p.getInt("mon_guides", 0)
+        safe = p.getBoolean("mon_safe", false)
     }
 
     fun save(p: SharedPreferences) {
@@ -31,6 +42,7 @@ object Monitor {
             .putBoolean("mon_zebra", zebra).putInt("mon_zlevel", zebraLevel)
             .putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
             .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter)
+            .putInt("mon_guides", guides).putBoolean("mon_safe", safe)
             .apply()
     }
 

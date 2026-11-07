@@ -12,6 +12,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
@@ -174,6 +175,67 @@ class GridView(ctx: Context) : View(ctx) {
     }
 }
 
+/** Guide di inquadratura per i social: ritagli centrati sull'immagine, ognuno col suo colore e nome. */
+class GuidesView(ctx: Context) : View(ctx) {
+    var aspect = 16f / 9f
+    var mask = 0
+    var safe = false
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = ctx.dp(2).toFloat()
+    }
+    private val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = ctx.dp(1).toFloat()
+        color = 0xCCFFFFFF.toInt()
+        pathEffect = DashPathEffect(floatArrayOf(ctx.dp(8).toFloat(), ctx.dp(6).toFloat()), 0f)
+    }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = ctx.dp(12).toFloat()
+        typeface = Typeface.DEFAULT_BOLD
+        setShadowLayer(ctx.dp(2).toFloat(), 0f, 0f, 0xFF000000.toInt())
+    }
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        var iw = w
+        var ih = w / aspect
+        if (ih > h) { ih = h; iw = h * aspect }
+        val l = (w - iw) / 2f
+        val t = (h - ih) / 2f
+        for (k in Guides.names.indices) {
+            if ((mask and (1 shl k)) == 0) continue
+            val a = Guides.ratios[k]
+            var gw = iw
+            var gh = iw / a
+            if (gh > ih) { gh = ih; gw = ih * a }
+            val gl = l + (iw - gw) / 2f
+            val gt = t + (ih - gh) / 2f
+            line.color = Guides.colors[k]
+            c.drawRect(gl, gt, gl + gw, gt + gh, line)
+            txt.color = Guides.colors[k]
+            c.drawText(Guides.names[k], gl + dp(6), gt + dp(16), txt)
+        }
+        if (safe) {
+            // zona sicura 9:16: lontano da titoli in alto, didascalie in basso e pulsanti a destra (valori approssimati)
+            val a = Guides.ratios[0]
+            var gw = iw
+            var gh = iw / a
+            if (gh > ih) { gh = ih; gw = ih * a }
+            val gl = l + (iw - gw) / 2f
+            val gt = t + (ih - gh) / 2f
+            val sl = gl + gw * 0.06f
+            val sr = gl + gw * 0.86f
+            val st = gt + gh * 0.12f
+            val sb = gt + gh * 0.78f
+            c.drawRect(sl, st, sr, sb, dash)
+            txt.color = 0xCCFFFFFF.toInt()
+            c.drawText("zona sicura", sl + dp(6), st + dp(16), txt)
+        }
+    }
+}
+
 /** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
 class IconButton(ctx: Context) : View(ctx) {
     enum class Kind { CAMERA, SHARE, LAYERS }
@@ -232,6 +294,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val zebraImg = ImageView(ctx)
     private val peakImg = ImageView(ctx)
     private val gridV = GridView(ctx)
+    private val guideV = GuidesView(ctx)
     private val tag = TextView(ctx)
     private val lag = TextView(ctx)
     private val empty = TextView(ctx)
@@ -332,6 +395,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         addView(peakImg, full())
         gridV.visibility = View.GONE
         addView(gridV, full())
+        guideV.visibility = View.GONE
+        addView(guideV, full())
 
         // Al centro: tasto Connetti / Riprova / Annulla e, sotto, il messaggio di stato
         msgBox.orientation = LinearLayout.VERTICAL
@@ -606,6 +671,11 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         gridV.aspect = b.width.toFloat() / b.height
         gridV.visibility = if (Monitor.grid) View.VISIBLE else View.GONE
         gridV.invalidate()
+        guideV.aspect = b.width.toFloat() / b.height
+        guideV.mask = Monitor.guides
+        guideV.safe = Monitor.safe
+        guideV.visibility = if (Monitor.guides != 0 || Monitor.safe) View.VISIBLE else View.GONE
+        guideV.invalidate()
 
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
@@ -771,6 +841,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         zebraImg.visibility = View.GONE
         peakImg.visibility = View.GONE
         gridV.visibility = View.GONE
+        guideV.visibility = View.GONE
         histV.visibility = View.GONE
         meterBox.visibility = View.GONE
         lag.visibility = View.GONE
@@ -955,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
         applyTally()
         refreshStatus()
-        addLog("Doppia 1.1: live, REC, esposizione, segni e take per Premiere, tally grande.")
+        addLog("Doppia 1.2: live, REC, esposizione, segni e take per Premiere, tally grande.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -1489,6 +1560,10 @@ class MainActivity : AppCompatActivity() {
             Monitor.peakColor = pc[it]; Monitor.save(prefs)
         })
         col.addView(toggleRow("Griglia dei terzi", Monitor.grid) { Monitor.grid = it; Monitor.save(prefs) })
+        col.addView(multiRow("Guide inquadratura (tocca per accendere)", Guides.names.toList(), Monitor.guides) {
+            Monitor.guides = it; Monitor.save(prefs)
+        })
+        col.addView(toggleRow("Zona sicura 9:16 (approssimata)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
         col.addView(toggleRow("Istogramma", Monitor.histogram) { Monitor.histogram = it; Monitor.save(prefs) })
         col.addView(toggleRow("Esposimetro (stimato dall'immagine)", Monitor.meter) { Monitor.meter = it; Monitor.save(prefs) })
 
@@ -1747,6 +1822,47 @@ class MainActivity : AppCompatActivity() {
         sw.setPadding(0, dp(8), 0, dp(8))
         sw.setOnCheckedChangeListener { _, v -> onChange(v) }
         return sw
+    }
+
+    /** Riga di pulsanti accendibili in piu' alla volta: il valore e' una maschera di bit. */
+    private fun multiRow(label: String, options: List<String>, mask: Int, onChange: (Int) -> Unit): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(0, dp(6), 0, dp(6))
+        val l = TextView(this)
+        l.text = label
+        l.setTextColor(Pal.TEXT)
+        l.textSize = 15f
+        box.addView(l)
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        val pills = ArrayList<TextView>()
+        var cur = mask
+        fun paint() {
+            for ((k, t) in pills.withIndex()) {
+                val on = (cur and (1 shl k)) != 0
+                t.setTextColor(if (on) Pal.MID else Pal.TEXT)
+                t.background = roundBg(if (on) 0x33FFC107 else Pal.LINE, 14, this)
+            }
+        }
+        for ((k, o) in options.withIndex()) {
+            val t = TextView(this)
+            t.text = o
+            t.textSize = 14f
+            t.typeface = Typeface.DEFAULT_BOLD
+            t.setPadding(dp(14), dp(7), dp(14), dp(7))
+            t.setOnClickListener { cur = cur xor (1 shl k); paint(); onChange(cur) }
+            pills.add(t)
+            row.addView(t, if (k == 0) LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) else spaced(6))
+        }
+        paint()
+        val hs = HorizontalScrollView(this)
+        hs.isHorizontalScrollBarEnabled = false
+        hs.addView(row)
+        val hlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        hlp.topMargin = dp(6)
+        box.addView(hs, hlp)
+        return box
     }
 
     private fun chooserRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit): View {

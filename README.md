@@ -1,4 +1,4 @@
-# Doppia 1.1 (live view, REC, esposizione, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.2 (live view, REC, esposizione, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,9 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 1.2
+- **Guide inquadratura per i social**: Impostazioni > Monitor. Accendi in piu' alla volta **9:16** (Reel, TikTok, Shorts), **4:5** (feed Instagram), **1:1**, **16:9** e **2.39:1**: ogni guida e' un ritaglio centrato sull'immagine, con il suo colore e il suo nome. In piu' la **zona sicura 9:16** (valori approssimati) tiene titoli e testi lontani da dove le app social mettono didascalie e pulsanti. Gli screenshot restano puliti, senza guide.
 
 ## Novita' 1.1
 - **Screenshot e sovrapposizione**: i due pulsanti sono piu' piccoli e stanno sotto il live view, sopra la barra REC, dal lato esterno: a sinistra nel riquadro di sinistra, a destra in quello di destra.
