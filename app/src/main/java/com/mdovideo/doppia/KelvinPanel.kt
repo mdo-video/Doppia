@@ -48,6 +48,8 @@ import kotlin.math.roundToInt
 /** Cio' che il misuratore Kelvin chiede a Doppia. */
 interface KelvinHost {
     val activity: AppCompatActivity
+    /** Quante camere Sony ci sono nell'app (1 per riquadro). */
+    val camCount: Int
     fun camLabel(i: Int): String
     fun isLive(i: Int): Boolean
     fun frame(i: Int): Bitmap?
@@ -93,7 +95,9 @@ class KelvinPanel(private val host: KelvinHost) {
     private val main = Handler(Looper.getMainLooper())
     private val dlg = Dialog(act)
 
-    private var source = -1          // 0/1 = camera Sony, 2 = camera del dispositivo
+    private var source = -1          // 0.. = camera Sony, TABLET = camera del dispositivo
+    private val TABLET = 100
+    private fun isCam(s: Int): Boolean = s in 0 until host.camCount
     private val history = mutableListOf<Double>()
     private var hold = false
     private var gotReading = false
@@ -194,7 +198,7 @@ class KelvinPanel(private val host: KelvinHost) {
         texture = TextureView(act)
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(s: SurfaceTexture, w: Int, h: Int) {
-                if (source == 2) openTablet()
+                if (source == TABLET) openTablet()
             }
             override fun onSurfaceTextureSizeChanged(s: SurfaceTexture, w: Int, h: Int) {}
             override fun onSurfaceTextureDestroyed(s: SurfaceTexture): Boolean = true
@@ -297,15 +301,15 @@ class KelvinPanel(private val host: KelvinHost) {
         }
         setAllBtn = button("Imposta camere", Pal.MID, Pal.BG)
         setAllBtn.setOnClickListener {
-            if (shownK > 0) host.applyKelvin(shownK, (0..1).filter { host.isLive(it) })
+            if (shownK > 0) host.applyKelvin(shownK, (0 until host.camCount).filter { host.isLive(it) })
         }
         setOneBtn = button("Solo camera", Pal.LINE, Pal.TEXT)
         setOneBtn.setOnClickListener {
-            if (shownK > 0 && source in 0..1) host.applyKelvin(shownK, listOf(source))
+            if (shownK > 0 && isCam(source)) host.applyKelvin(shownK, listOf(source))
         }
         modeBtn = button("Passa a Kelvin 5600 K", Pal.LINE, Pal.TEXT)
         modeBtn.setOnClickListener {
-            if (source in 0..1) host.applyKelvin(5600, listOf(source))
+            if (isCam(source)) host.applyKelvin(5600, listOf(source))
         }
         buttons.addView(holdBtn)
         buttons.addView(setAllBtn)
@@ -324,7 +328,7 @@ class KelvinPanel(private val host: KelvinHost) {
         dlg.show()
         relayout()
 
-        val firstLive = (0..1).firstOrNull { host.isLive(it) }
+        val firstLive = (0 until host.camCount).firstOrNull { host.isLive(it) }
         select(firstLive ?: 2)
     }
 
@@ -397,14 +401,14 @@ class KelvinPanel(private val host: KelvinHost) {
 
     private fun rebuildChips() {
         chipsRow.removeAllViews()
-        for (i in 0..1) {
+        for (i in 0 until host.camCount) {
             val live = host.isLive(i)
             chipsRow.addView(chip(host.camLabel(i), source == i, live) { select(i) },
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { marginEnd = dp(8) })
         }
-        chipsRow.addView(chip("Camera tablet", source == 2, true) { select(2) })
+        chipsRow.addView(chip("Camera tablet", source == TABLET, true) { select(TABLET) })
     }
 
     private fun chip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit): TextView =
@@ -438,13 +442,13 @@ class KelvinPanel(private val host: KelvinHost) {
         setAllBtn.alpha = 0.4f
         setOneBtn.isEnabled = false
         setOneBtn.alpha = 0.4f
-        setOneBtn.visibility = if (s in 0..1) View.VISIBLE else View.GONE
-        if (s in 0..1) setOneBtn.text = "Solo ${host.camLabel(s)}"
+        setOneBtn.visibility = if (isCam(s)) View.VISIBLE else View.GONE
+        if (isCam(s)) setOneBtn.text = "Solo ${host.camLabel(s)}"
         modeBtn.visibility = View.GONE
         rebuildChips()
         updatePill()
 
-        if (s == 2) {
+        if (s == TABLET) {
             image.visibility = View.INVISIBLE
             box.visibility = View.INVISIBLE
             texture.visibility = View.VISIBLE
@@ -523,7 +527,7 @@ class KelvinPanel(private val host: KelvinHost) {
     private val tick = object : Runnable {
         override fun run() {
             if (!dlg.isShowing) return
-            if (source in 0..1) measureCamera(source)
+            if (isCam(source)) measureCamera(source)
             main.postDelayed(this, 250L)
         }
     }
@@ -687,7 +691,7 @@ class KelvinPanel(private val host: KelvinHost) {
         if (act.checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             status("Serve il permesso camera")
             host.askCameraPermission { ok ->
-                if (ok && source == 2) openTablet() else if (!ok) status("Permesso camera negato")
+                if (ok && source == TABLET) openTablet() else if (!ok) status("Permesso camera negato")
             }
             return
         }
@@ -740,7 +744,7 @@ class KelvinPanel(private val host: KelvinHost) {
             val info = "neutral point: ${kNeutral?.roundToInt() ?: "n/d"} K\n" +
                 "guadagni AWB: ${kGains?.roundToInt() ?: "n/d"} K" +
                 (if (approx) "\nmatrici colore non disponibili: modello generico" else "")
-            main.post { if (source == 2) pushReading(k, info) }
+            main.post { if (source == TABLET) pushReading(k, info) }
         }
     }
 

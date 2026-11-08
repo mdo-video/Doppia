@@ -6,6 +6,9 @@ import android.graphics.Bitmap
 /** Risultato dell'analisi di un fotogramma: istogramma, esposizione media e maschere per zebra / peaking. */
 class Analysis(val hist: IntArray?, val ev: Float, val zebra: Bitmap?, val peaking: Bitmap?)
 
+/** Numero massimo di camere che Doppia puo' mostrare insieme. */
+const val MAX_CAMS = 4
+
 /** Guide di inquadratura: rapporti, nomi e colori (ritagli centrati sull'immagine). */
 object Guides {
     val names = arrayOf("9:16", "4:5", "1:1", "16:9", "2.39:1")
@@ -13,7 +16,7 @@ object Guides {
     val colors = intArrayOf(0xFFFFC107.toInt(), 0xFF4FC3F7.toInt(), 0xFF81C784.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF7043.toInt())
 
     /** Posizione di ogni guida per camera: -1 = tutto a sinistra (o in alto), 0 = centro, 1 = tutto a destra (o in basso). */
-    val pos = Array(2) { FloatArray(5) }
+    val pos = Array(MAX_CAMS) { FloatArray(5) }
 
     /** Una guida piu' larga dell'immagine (es. 2.39:1 su 16:9) si muove in verticale, le altre in orizzontale. */
     fun axisVertical(k: Int, aspect: Float): Boolean {
@@ -39,7 +42,7 @@ object Guides {
         for (k in names.indices) {
             if ((mask and (1 shl k)) == 0) continue
             val v = axisVertical(k, aspect)
-            val p = pos[cam.coerceIn(0, 1)][k]
+            val p = pos[cam.coerceIn(0, MAX_CAMS - 1)][k]
             val o = org.json.JSONObject()
             o.put("guide", names[k])
             o.put("pos", Math.round(p * 1000f) / 1000f.toDouble())
@@ -52,11 +55,11 @@ object Guides {
     }
 
     fun load(p: SharedPreferences) {
-        for (c in 0..1) for (k in names.indices) pos[c][k] = p.getFloat("gpos_${c}_$k", 0f).coerceIn(-1f, 1f)
+        for (c in 0 until MAX_CAMS) for (k in names.indices) pos[c][k] = p.getFloat("gpos_${c}_$k", 0f).coerceIn(-1f, 1f)
     }
 
     fun save(e: SharedPreferences.Editor) {
-        for (c in 0..1) for (k in names.indices) e.putFloat("gpos_${c}_$k", pos[c][k])
+        for (c in 0 until MAX_CAMS) for (k in names.indices) e.putFloat("gpos_${c}_$k", pos[c][k])
     }
 }
 

@@ -1,4 +1,4 @@
-# Doppia 1.13 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.14 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,11 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 1.14
+- **Piu' camere**: tasto **+** tra la prima e la seconda anteprima (solo in Setup, con tutte le anteprime visibili) per aggiungere una camera. Si apre Impostazioni > Camere per scrivere nome e indirizzo IP. **Limite: 4 camere** (costante `MAX_CAMS` in `Monitor.kt`): ognuna manda il suo live view via Wi-Fi e il tablet deve decodificarle tutte. Con 3 o 4 camere in orizzontale i riquadri diventano una griglia 2 x 2; in verticale restano una sopra l'altra.
+- Le camere aggiunte si tolgono da Impostazioni > Camere (**Rimuovi**, solo l'ultima, mai le prime due). REC A+B diventa **REC TUTTE**, Sync, REC non allineato, take, segni, scena, Premiere, guide e **Set WB** valgono per tutte le camere.
+- **Impostazioni in categorie**: Camere, Monitor, Guide, Parametri camera, Take e segni, Avvisi e tally, Aggiornamenti, Test e diagnostica. Tocca una voce per aprirla, **‹ Impostazioni** per tornare all'elenco.
 
 ## Novita' 1.13
 - **Batteria sotto il 15%**: l'indicatore lampeggia in modo affidabile (il ciclo riparte da solo dopo cambi di schermata, riconnessioni e ritorni dall'app).

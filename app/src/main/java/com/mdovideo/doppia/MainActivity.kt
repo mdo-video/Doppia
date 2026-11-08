@@ -299,7 +299,7 @@ class GuidesView(ctx: Context) : View(ctx) {
         val tx = (iw - gw) / 2f
         val ty = (ih - gh) / 2f
         val vertical = ty > tx
-        val p = Guides.pos[cam.coerceIn(0, 1)][k]
+        val p = Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][k]
         val gl = il + tx + (if (vertical) 0f else p * tx)
         val gt = itop + ty + (if (vertical) p * ty else 0f)
         bx[0] = gl; bx[1] = gt; bx[2] = gl + gw; bx[3] = gt + gh; bx[4] = tx; bx[5] = ty
@@ -326,7 +326,7 @@ class GuidesView(ctx: Context) : View(ctx) {
             if (k < 0) return false
             geom(); box(k)
             if (e.x in bx[0]..bx[2] && e.y in bx[1]..bx[3]) {
-                Guides.pos[cam.coerceIn(0, 1)][k] = 0f
+                Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][k] = 0f
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                 invalidate()
                 onMove?.invoke(k, true)
@@ -360,7 +360,7 @@ class GuidesView(ctx: Context) : View(ctx) {
                     dragK = k
                     dragX = e.x
                     dragY = e.y
-                    dragStart = Guides.pos[cam.coerceIn(0, 1)][k]
+                    dragStart = Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][k]
                     snapped = false
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
@@ -380,7 +380,7 @@ class GuidesView(ctx: Context) : View(ctx) {
                 else if (Math.abs(p) > 0.96f) { p = if (p < 0) -1f else 1f; snap = true }
                 if (snap && !snapped) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
                 snapped = snap
-                Guides.pos[cam.coerceIn(0, 1)][dragK] = p
+                Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][dragK] = p
                 invalidate()
                 onMove?.invoke(dragK, false)
                 return true
@@ -419,7 +419,7 @@ class GuidesView(ctx: Context) : View(ctx) {
             val cy = itop + ih / 2f
             if (Guides.axisVertical(dragK, aspect)) c.drawLine(il, cy, il + iw, cy, dash) else c.drawLine(cx, itop, cx, itop + ih, dash)
             box(dragK)
-            val p = Guides.pos[cam.coerceIn(0, 1)][dragK]
+            val p = Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][dragK]
             c.drawText(Guides.names[dragK] + "  " + Guides.describe(p, Guides.axisVertical(dragK, aspect)), (bx[0] + bx[2]) / 2f, (bx[1] + bx[3]) / 2f, big)
         }
         if (safe) {
@@ -794,7 +794,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         fun setGuidePos(v: Float) {
             val k = guideV.selActive()
             if (k < 0 || guideV.locked) return
-            Guides.pos[cam.coerceIn(0, 1)][k] = v
+            Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][k] = v
             guideV.invalidate()
             updateGuideBar()
             onGuideSave?.invoke()
@@ -1292,7 +1292,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         gright.visibility = vis
         gleft.text = if (vert) "▲" else "◀"
         gright.text = if (vert) "▼" else "▶"
-        val info = if (k < 0) "" else Guides.names[k] + " · " + Guides.describe(Guides.pos[cam.coerceIn(0, 1)][k], vert)
+        val info = if (k < 0) "" else Guides.names[k] + " · " + Guides.describe(Guides.pos[cam.coerceIn(0, MAX_CAMS - 1)][k], vert)
         if (ginfo.text.toString() != info) ginfo.text = info
         ginfo.visibility = if (k < 0) View.GONE else View.VISIBLE
     }
@@ -1436,10 +1436,12 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 class MainActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("doppia", MODE_PRIVATE) }
-    private val cams = arrayOfNulls<SonyCam>(2)
+    private val cams = arrayOfNulls<SonyCam>(MAX_CAMS)
     /** Modalita' test (camere finte): sempre spenta all'avvio, si accende in Impostazioni con il PIN. */
     private var simOn = false
-    private lateinit var tiles: Array<Tile>
+    private val tiles = ArrayList<Tile>()
+    private var addBtn: TextView? = null
+    private lateinit var stageView: FrameLayout
     private lateinit var status: TextView
     private lateinit var logClose: MaterialButton
     private lateinit var recAllBtn: MaterialButton
@@ -1452,11 +1454,11 @@ class MainActivity : AppCompatActivity() {
     private var shootMode = false
     private var holdDone = false
     // riconnessione automatica
-    private val want = BooleanArray(2)
-    private val everLive = BooleanArray(2)
-    private val retryN = IntArray(2)
-    private val lostAt = LongArray(2)
-    private val retryRun = arrayOfNulls<Runnable>(2)
+    private val want = BooleanArray(MAX_CAMS)
+    private val everLive = BooleanArray(MAX_CAMS)
+    private val retryN = IntArray(MAX_CAMS)
+    private val lostAt = LongArray(MAX_CAMS)
+    private val retryRun = arrayOfNulls<Runnable>(MAX_CAMS)
     // REC non allineato
     private var mismatchSince = 0L
     private var blinkPhase = false
@@ -1467,22 +1469,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
     // ultimi valori di batteria e memoria letti da ogni camera (per la scheda sessione)
-    private val lastBat = arrayOfNulls<Int>(2)
-    private val lastMem = arrayOfNulls<String>(2)
-    private val lastInfoAt = LongArray(2)
+    private val lastBat = arrayOfNulls<Int>(MAX_CAMS)
+    private val lastMem = arrayOfNulls<String>(MAX_CAMS)
+    private val lastInfoAt = LongArray(MAX_CAMS)
     private lateinit var updBtn: MaterialButton
     private var pendingUpdate: Updater.Release? = null
     @Volatile private var updCancel = false
     private var pickFor = -1
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val i = pickFor
-        if (uri != null && i in 0..1) importOverlay(i, uri)
+        if (uri != null && i in tiles.indices) importOverlay(i, uri)
     }
     private lateinit var rootView: LinearLayout
-    private val stopBtns = arrayOfNulls<MaterialButton>(2)
+    private val stopBtns = arrayOfNulls<MaterialButton>(MAX_CAMS)
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
-    private val liveNow = BooleanArray(2)
+    private val liveNow = BooleanArray(MAX_CAMS)
     private val lines = ArrayDeque<String>()
     private val clock = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
     private var solo = -1
@@ -1497,7 +1499,7 @@ class MainActivity : AppCompatActivity() {
         Monitor.load(prefs)
         syncOn = prefs.getBoolean("sync", false)
         Session.load(prefs)
-        for (i in 0..1) {
+        for (i in 0 until MAX_CAMS) {
             if (prefs.contains("lbat$i")) lastBat[i] = prefs.getInt("lbat$i", 0)
             lastMem[i] = prefs.getString("lmem$i", null)
             lastInfoAt[i] = prefs.getLong("lat$i", 0L)
@@ -1572,7 +1574,7 @@ class MainActivity : AppCompatActivity() {
             syncOn = !syncOn
             prefs.edit().putBoolean("sync", syncOn).apply()
             paintSync()
-            val msg = if (syncOn) "Sync attiva: le modifiche vanno su entrambe le camere" else "Sync spenta: ogni camera per conto suo"
+            val msg = if (syncOn) "Sync attiva: le modifiche vanno su tutte le camere" else "Sync spenta: ogni camera per conto suo"
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
             addLog(msg)
         }
@@ -1620,47 +1622,28 @@ class MainActivity : AppCompatActivity() {
 
         // Area dei due riquadri, con il log sopra
         val stage = FrameLayout(this)
+        stageView = stage
         tilesRow = LinearLayout(this)
         tilesRow.orientation = LinearLayout.HORIZONTAL
-        tiles = arrayOf(Tile(this, camName(0), Pal.COLD), Tile(this, camName(1), Pal.HOT))
-        for (i in 0..1) {
-            val t = tiles[i]
-            t.cam = i
-            t.onGuideSave = { Monitor.save(prefs) }
-            t.onConnect = { toggle(i) }
-            t.onShot = { takeShot(i) }
-            t.onShare = { shareShot(i) }
-            t.onOvlLast = { overlayFromLast(i) }
-            t.onOvlPick = { pickFor = i; pickImage.launch("image/*") }
-            t.onOvlClear = { overlayClear(i) }
-            t.onOvlOpacity = { pct -> prefs.edit().putInt("ovlop$i", pct).apply() }
-            t.onRec = { cams[i]?.toggleRec() }
-            t.onGiveUp = { giveUp(i) }
-            t.onRecChange = { r -> onRecChange(i, r) }
-            t.onLevels = { bl, mem -> checkLevels(i, bl, mem) }
-            t.onToggleGuides = {
-                Monitor.guidesShow = !Monitor.guidesShow
-                Monitor.save(prefs)
-                refreshToolButtons()
-                if (Monitor.guidesShow && Monitor.guides == 0 && !Monitor.safe) {
-                    Toast.makeText(this, "Nessuna guida scelta: accendile in Impostazioni", Toast.LENGTH_SHORT).show()
-                }
-            }
-            t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; Monitor.save(prefs); refreshToolButtons() }
-            t.onTogglePeak = { Monitor.peaking = !Monitor.peaking; Monitor.save(prefs); refreshToolButtons() }
-            t.onPick = { p, v -> applyProp(i, p, v) }
-            Springs.pressable(t, 0.985f)
-            t.setOnClickListener {
-                solo = if (solo == i) -1 else i
-                applyLayout()
-            }
-            tilesRow.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        }
+        val savedN = prefs.getInt("ncams", 2).coerceIn(2, MAX_CAMS)
+        for (i in 0 until savedN) tiles.add(Tile(this, camName(i), camColor(i)))
+        for (i in 0 until savedN) setupTile(i)
         applyOrientation()
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        tiles[0].setSide(false)
-        tiles[1].setSide(true)
-        for (i in 0..1) {
+        // "+" tra la prima e la seconda anteprima: aggiunge un'altra camera
+        val add = TextView(this)
+        add.text = "+"
+        add.textSize = 26f
+        add.typeface = Typeface.DEFAULT_BOLD
+        add.setTextColor(Pal.BG)
+        add.gravity = Gravity.CENTER
+        add.background = roundBg(Pal.MID, 30, this)
+        add.setOnClickListener { addCamera() }
+        stage.addView(add, FrameLayout.LayoutParams(dp(48), dp(48)))
+        addBtn = add
+        tilesRow.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionAdd() }
+        updateAddBtn()
+        for (i in tiles.indices) {
             val f = overlayFile(i)
             val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
             tiles[i].setOverlay(bmp, prefs.getInt("ovlop$i", 50))
@@ -1731,7 +1714,7 @@ class MainActivity : AppCompatActivity() {
             checkUpdate(false)
         }
         if (prefs.getBoolean("auto", true)) {
-            for (i in 0..1) {
+            for (i in tiles.indices) {
                 val ip = (prefs.getString("ip$i", "") ?: "").trim()
                 if (ip.isNotEmpty() && cams[i] == null) toggle(i)
             }
@@ -1740,8 +1723,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         rootView.removeCallbacks(alignRun)
-        for (i in 0..1) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
-        for (i in 0..1) cams[i]?.stop()
+        for (i in 0 until MAX_CAMS) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
+        for (i in 0 until MAX_CAMS) cams[i]?.stop()
         super.onDestroy()
     }
 
@@ -2018,13 +2001,15 @@ class MainActivity : AppCompatActivity() {
         shootRow.visibility = if (on) View.VISIBLE else View.GONE
         modeBtn.text = if (on) "⚙ Setup" else "▶ Ripresa"
         for (t in tiles) t.setShootMode(on)
+        updateAddBtn()
         if (on) settingsDlg?.dismiss()
     }
 
     /** REC A+B: con una camera in REC diventa STOP (da tenere premuto). */
     private fun paintRecAll() {
         val rec = tiles.any { it.recording }
-        recAllBtn.text = if (rec) "■ STOP A+B" else "REC A+B"
+        val all = if (tiles.size == 2) "A+B" else "TUTTE"
+        recAllBtn.text = if (rec) "■ STOP $all" else "REC $all"
     }
 
     // ---------- Scena e inquadratura (nome dei take) ----------
@@ -2065,10 +2050,10 @@ class MainActivity : AppCompatActivity() {
     private fun paintScene() {
         val sc = sceneName()
         sceneBtn.text = if (sc.isEmpty()) "🎬 Scena" else "🎬 $sc"
-        for (i in 0..1) tiles[i].setScene(takeLabel(i))
+        for (i in tiles.indices) tiles[i].setScene(takeLabel(i))
     }
 
-    /** Scena (una per tutte e due le camere) e inquadratura di ogni camera: il nome entra in elenco, XML e CSV. */
+    /** Scena (una per tutte le camere) e inquadratura di ogni camera: il nome entra in elenco, XML e CSV. */
     private fun sceneDialog() {
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -2119,8 +2104,8 @@ class MainActivity : AppCompatActivity() {
         if (recents.isNotEmpty()) col.addView(chipsRow(recents) { sceneEt.setText(it); sceneEt.setSelection(it.length) }, lpTop())
 
         val presets = listOf("Totale", "Campo medio", "Primo piano", "Dettaglio", "Cutaway", "Making of")
-        val frameEts = arrayOfNulls<EditText>(2)
-        for (i in 0..1) {
+        val frameEts = arrayOfNulls<EditText>(MAX_CAMS)
+        for (i in tiles.indices) {
             col.addView(sectionTitle("Inquadratura " + camName(i)))
             val et = field("es. Primo piano", frameName(i))
             frameEts[i] = et
@@ -2131,17 +2116,14 @@ class MainActivity : AppCompatActivity() {
         val dlg = Dialog(this)
         fun save() {
             val sc = sceneEt.text.toString().trim()
-            prefs.edit()
-                .putString("scene", sc)
-                .putString("frame0", frameEts[0]!!.text.toString().trim())
-                .putString("frame1", frameEts[1]!!.text.toString().trim())
-                .apply()
+            val ed = prefs.edit().putString("scene", sc)
+            for (i in tiles.indices) ed.putString("frame$i", frameEts[i]!!.text.toString().trim())
+            ed.apply()
             rememberScene(sc)
             paintScene()
             dlg.dismiss()
-            val a = takeLabel(0)
-            val b = takeLabel(1)
-            addLog("Scena: " + (if (a.isEmpty() && b.isEmpty()) "nessuna" else "${camName(0)} = ${a.ifEmpty { "—" }}, ${camName(1)} = ${b.ifEmpty { "—" }}"))
+            val labels = tiles.indices.map { takeLabel(it) }
+            addLog("Scena: " + (if (labels.all { it.isEmpty() }) "nessuna" else tiles.indices.joinToString(", ") { "${camName(it)} = ${labels[it].ifEmpty { "—" }}" }))
         }
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
@@ -2193,7 +2175,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Throwable) {}
     }
 
-    private val lowLvl = IntArray(2)
+    private val lowLvl = IntArray(MAX_CAMS)
 
     private fun refreshToolButtons() {
         for (t in tiles) t.refreshTools()
@@ -2219,7 +2201,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (lvl > lowLvl[i]) {
             lowLvl[i] = lvl
-            val rec = tiles[0].recording || tiles[1].recording
+            val rec = tiles.any { it.recording }
             alertCam(i, why, !rec)
         } else if (lvl == 0) {
             lowLvl[i] = 0
@@ -2233,20 +2215,22 @@ class MainActivity : AppCompatActivity() {
         if (sound) buzz()
     }
 
-    /** Ogni mezzo secondo: se una camera registra e l'altra no (tutte e due live) per piu' di 2,5 s, il riquadro che non registra lampeggia. */
+    /** Ogni mezzo secondo: se almeno una camera registra e un'altra live no, per piu' di 2,5 s, il riquadro che non registra lampeggia. */
     private fun checkAlign() {
         val on = prefs.getBoolean("alignwarn", true)
-        val bothLive = liveNow[0] && liveNow[1]
-        val diff = tiles[0].recording != tiles[1].recording
-        if (on && bothLive && diff) {
+        val live = tiles.indices.filter { liveNow[it] }
+        val anyRec = live.any { tiles[it].recording }
+        val anyIdle = live.any { !tiles[it].recording }
+        if (on && live.size >= 2 && anyRec && anyIdle) {
             val now = SystemClock.elapsedRealtime()
             if (mismatchSince == 0L) mismatchSince = now
             if (now - mismatchSince > 2500L) {
                 blinkPhase = !blinkPhase
-                val idle = if (tiles[0].recording) 1 else 0
-                tiles[idle].setMisaligned(true, blinkPhase)
-                tiles[1 - idle].setMisaligned(false, false)
-                if (now - mismatchSince in 2500L..3100L) addLog("REC non allineato: ${camName(idle)} non registra")
+                val idle = live.filter { !tiles[it].recording }
+                for (i in tiles.indices) {
+                    if (i in idle) tiles[i].setMisaligned(true, blinkPhase) else tiles[i].setMisaligned(false, false)
+                }
+                if (now - mismatchSince in 2500L..3100L) addLog("REC non allineato: " + idle.joinToString(", ") { camName(it) } + " non registra")
                 return
             }
         }
@@ -2309,6 +2293,7 @@ class MainActivity : AppCompatActivity() {
 
     private val kelvinHost = object : KelvinHost {
         override val activity: androidx.appcompat.app.AppCompatActivity get() = this@MainActivity
+        override val camCount: Int get() = tiles.size
         override fun camLabel(i: Int): String = camName(i)
         override fun isLive(i: Int): Boolean = cams[i] != null && liveNow[i]
         override fun frame(i: Int): Bitmap? = tiles[i].frame()
@@ -2392,20 +2377,22 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    /** Cambia un parametro sulla camera i e, con Sync accesa, sull'altra camera se live e se accetta quel valore. */
+    /** Cambia un parametro sulla camera i e, con Sync accesa, sulle altre camere live che accettano quel valore. */
     private fun applyProp(i: Int, p: Prop, v: Long) {
         cams[i]?.setProp(p, v)
         if (!syncOn) return
-        val j = 1 - i
-        val other = cams[j]
-        if (other == null || !liveNow[j]) return
-        val op = other.props[p.code]
-        if (op != null && op.settable && op.options.contains(v)) {
-            other.setProp(op, v)
-        } else {
-            val msg = "Sync: ${camName(j)} non accetta ${SonyProps.fmt(p.code, v)} per ${propLabel(p.code)}"
-            addLog(msg)
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        for (j in tiles.indices) {
+            if (j == i) continue
+            val other = cams[j]
+            if (other == null || !liveNow[j]) continue
+            val op = other.props[p.code]
+            if (op != null && op.settable && op.options.contains(v)) {
+                other.setProp(op, v)
+            } else {
+                val msg = "Sync: ${camName(j)} non accetta ${SonyProps.fmt(p.code, v)} per ${propLabel(p.code)}"
+                addLog(msg)
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -2451,7 +2438,7 @@ class MainActivity : AppCompatActivity() {
         val lag = prefs.getInt("reclag", 300)
         val refs = ArrayList<Ref>()
         val sb = StringBuilder()
-        for (i in 0..1) {
+        for (i in tiles.indices) {
             val ms = tiles[i].recElapsedMs()
             val tk = Session.openTake(i)
             if (ms < 0L || tk == null) continue
@@ -2678,7 +2665,7 @@ class MainActivity : AppCompatActivity() {
         dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
-    private fun camNames(): List<String> = listOf(camName(0), camName(1))
+    private fun camNames(): List<String> = tiles.indices.map { camName(it) }
 
     /** Scrive XML (Premiere), JSON (plugin) e CSV (take list) e apre il menu di condivisione. */
     private fun exportSession() {
@@ -2734,7 +2721,7 @@ class MainActivity : AppCompatActivity() {
             dir.listFiles()?.filter { it.name.startsWith("Doppia_Sessione_") }?.forEach { it.delete() }
             val base = "Doppia_Sessione_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.ROOT).format(Date())
             val f = File(dir, "$base.txt")
-            f.writeText(Session.card(camNames(), listOf(finalInfoLine(0), finalInfoLine(1))), Charsets.UTF_8)
+            f.writeText(Session.card(camNames(), tiles.indices.map { finalInfoLine(it) }), Charsets.UTF_8)
             val it2 = Intent(Intent.ACTION_SEND)
             it2.type = "text/plain"
             it2.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(this, "$packageName.fileprovider", f))
@@ -2747,9 +2734,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Collega al riquadro i tutti i comandi (REC, screenshot, guide, valori...). */
+    private fun setupTile(i: Int) {
+        val t = tiles[i]
+        t.cam = i
+        t.onGuideSave = { Monitor.save(prefs) }
+        t.onConnect = { toggle(i) }
+        t.onShot = { takeShot(i) }
+        t.onShare = { shareShot(i) }
+        t.onOvlLast = { overlayFromLast(i) }
+        t.onOvlPick = { pickFor = i; pickImage.launch("image/*") }
+        t.onOvlClear = { overlayClear(i) }
+        t.onOvlOpacity = { pct -> prefs.edit().putInt("ovlop$i", pct).apply() }
+        t.onRec = { cams[i]?.toggleRec() }
+        t.onGiveUp = { giveUp(i) }
+        t.onRecChange = { r -> onRecChange(i, r) }
+        t.onLevels = { bl, mem -> checkLevels(i, bl, mem) }
+        t.onToggleGuides = {
+            Monitor.guidesShow = !Monitor.guidesShow
+            Monitor.save(prefs)
+            refreshToolButtons()
+            if (Monitor.guidesShow && Monitor.guides == 0 && !Monitor.safe) {
+                Toast.makeText(this, "Nessuna guida scelta: accendile in Impostazioni", Toast.LENGTH_SHORT).show()
+            }
+        }
+        t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; Monitor.save(prefs); refreshToolButtons() }
+        t.onTogglePeak = { Monitor.peaking = !Monitor.peaking; Monitor.save(prefs); refreshToolButtons() }
+        t.onPick = { p, v -> applyProp(i, p, v) }
+        Springs.pressable(t, 0.985f)
+        t.setOnClickListener {
+            solo = if (solo == i) -1 else i
+            applyLayout()
+        }
+    }
+
+    private fun camColor(i: Int): Int = when (i) {
+        0 -> Pal.COLD
+        1 -> Pal.HOT
+        2 -> 0xFF66BB6A.toInt()
+        else -> 0xFFBA68C8.toInt()
+    }
+
     private fun camName(i: Int): String {
         val n = (prefs.getString("name$i", "") ?: "").trim()
-        return if (n.isEmpty()) (if (i == 0) "Camera A" else "Camera B") else n
+        return if (n.isEmpty()) "Camera ${'A' + i}" else n
     }
 
     private fun showLog(on: Boolean) {
@@ -2765,7 +2793,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Avvia o ferma la registrazione su tutte le camere live: se una registra, ferma quelle che registrano. */
     private fun recBoth() {
-        val live = (0..1).filter { cams[it] != null && liveNow[it] }
+        val live = tiles.indices.filter { cams[it] != null && liveNow[it] }
         if (live.isEmpty()) {
             addLog("REC: nessuna camera live")
             return
@@ -2777,17 +2805,119 @@ class MainActivity : AppCompatActivity() {
     private fun isPortrait(): Boolean =
         resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
 
-    /** Tablet in orizzontale: camere affiancate. In verticale: una sopra l'altra. */
+    /** Tablet in orizzontale: camere affiancate (con 3 o 4 camere, griglia 2 x 2). In verticale: una sopra l'altra. */
     private fun applyOrientation() {
         val port = isPortrait()
-        tilesRow.orientation = if (port) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-        for (i in 0..1) {
-            val lp = if (port) LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-            else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-            if (i == 1) { if (port) lp.topMargin = dp(10) else lp.leftMargin = dp(10) }
-            tiles[i].layoutParams = lp
+        val n = tiles.size
+        for (t in tiles) (t.parent as? ViewGroup)?.removeView(t)
+        tilesRow.removeAllViews()
+        val grid = !port && n > 2
+        tilesRow.orientation = if (grid || port) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        val perLine = if (grid) 2 else n
+        var idx = 0
+        while (idx < n) {
+            val line: LinearLayout
+            if (grid) {
+                line = LinearLayout(this)
+                line.orientation = LinearLayout.HORIZONTAL
+                val llp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+                if (idx > 0) llp.topMargin = dp(10)
+                tilesRow.addView(line, llp)
+            } else {
+                line = tilesRow
+            }
+            for (k in 0 until perLine) {
+                if (idx >= n) break
+                val lp = if (port) LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+                else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                if (k > 0) { if (port) lp.topMargin = dp(10) else lp.leftMargin = dp(10) }
+                line.addView(tiles[idx], lp)
+                idx++
+            }
         }
+        for (i in tiles.indices) tiles[i].setSide(i % 2 == 1)
         tilesRow.requestLayout()
+        positionAdd()
+    }
+
+    /** Mette il "+" sulla linea che separa la prima dalla seconda anteprima. */
+    private fun positionAdd() {
+        val b = addBtn ?: return
+        if (tiles.size < 2) return
+        val t0 = tiles[0]
+        val t1 = tiles[1]
+        if (t0.width == 0 || t1.width == 0 || stageView.width == 0) return
+        val a = IntArray(2)
+        val c = IntArray(2)
+        val o = IntArray(2)
+        t0.getLocationInWindow(a)
+        t1.getLocationInWindow(c)
+        stageView.getLocationInWindow(o)
+        val cx: Float
+        val cy: Float
+        if (isPortrait()) {
+            cx = (a[0] - o[0]) + t0.width / 2f
+            cy = (a[1] + t0.height + c[1]) / 2f - o[1]
+        } else {
+            cx = (a[0] + t0.width + c[0]) / 2f - o[0]
+            cy = (a[1] - o[1]) + t0.height / 2f
+        }
+        b.x = cx - dp(24)
+        b.y = cy - dp(24)
+    }
+
+    /** Il "+" si vede solo in Setup, con tutte le anteprime visibili e se c'e' ancora posto. */
+    private fun updateAddBtn() {
+        val b = addBtn ?: return
+        b.visibility = if (!shootMode && solo == -1 && tiles.size < MAX_CAMS) View.VISIBLE else View.GONE
+        positionAdd()
+    }
+
+    /** Aggiunge una camera (fino a MAX_CAMS) e apre le impostazioni per scrivere nome e indirizzo IP. */
+    private fun addCamera() {
+        if (tiles.size >= MAX_CAMS) return
+        val i = tiles.size
+        tiles.add(Tile(this, camName(i), camColor(i)))
+        setupTile(i)
+        val f = overlayFile(i)
+        tiles[i].setOverlay(if (f.exists()) BitmapFactory.decodeFile(f.path) else null, prefs.getInt("ovlop$i", 50))
+        tiles[i].setShootMode(shootMode)
+        prefs.edit().putInt("ncams", tiles.size).apply()
+        applyOrientation()
+        applyLayout()
+        applyTally()
+        refreshStatus()
+        paintScene()
+        addLog("Aggiunta ${camName(i)}: ora ${tiles.size} camere")
+        showSettings(0)
+    }
+
+    /** Toglie l'ultima camera aggiunta (le prime due restano sempre). */
+    private fun removeLastCamera() {
+        if (tiles.size <= 2) return
+        val i = tiles.size - 1
+        if (tiles[i].recording) {
+            Toast.makeText(this, "Ferma prima il REC di ${camName(i)}", Toast.LENGTH_SHORT).show()
+            return
+        }
+        want[i] = false
+        everLive[i] = false
+        lostAt[i] = 0L
+        retryN[i] = 0
+        retryRun[i]?.let { rootView.removeCallbacks(it) }
+        cams[i]?.stop()
+        cams[i] = null
+        liveNow[i] = false
+        (tiles[i].parent as? ViewGroup)?.removeView(tiles[i])
+        tiles.removeAt(i)
+        if (solo >= tiles.size) solo = -1
+        prefs.edit().remove("name$i").remove("ip$i").putInt("ncams", tiles.size).apply()
+        applyOrientation()
+        applyLayout()
+        applyTally()
+        refreshStatus()
+        addLog("Tolta la camera ${'A' + i}: ora ${tiles.size} camere")
+        showSettings(0)
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -2801,41 +2931,90 @@ class MainActivity : AppCompatActivity() {
         (resources.displayMetrics.widthPixels * (if (isPortrait()) 0.94f else landscapeFraction)).toInt()
 
     private fun applyLayout() {
-        for (j in 0..1) tiles[j].visibility = if (solo == -1 || solo == j) View.VISIBLE else View.GONE
+        for (j in tiles.indices) tiles[j].visibility = if (solo == -1 || solo == j) View.VISIBLE else View.GONE
+        updateAddBtn()
     }
 
     private fun refreshStatus() {
         val n = liveNow.count { it }
-        status.text = if (n == 0) "nessuna camera live" else "$n di 2 live"
+        status.text = if (n == 0) "nessuna camera live" else "$n di ${tiles.size} live"
         recAllBtn.isEnabled = n > 0
         recAllBtn.alpha = if (n > 0) 1f else 0.4f
     }
 
     // ---------- Impostazioni ----------
 
-    private fun showSettings() {
+    private fun showSettings(openPage: Int = -1) {
         settingsDlg?.dismiss()
         val scroll = ScrollView(this)
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(22), dp(18), dp(22), dp(18))
-        scroll.addView(col)
+        val outer = LinearLayout(this)
+        outer.orientation = LinearLayout.VERTICAL
+        outer.setPadding(dp(22), dp(18), dp(22), dp(18))
+        scroll.addView(outer)
 
         val head = TextView(this)
         head.text = "Impostazioni"
         head.setTextColor(Pal.TEXT)
         head.textSize = 20f
         head.typeface = Typeface.DEFAULT_BOLD
-        col.addView(head)
+        outer.addView(head)
 
-        col.addView(sectionTitle("Camere"))
-        for (i in 0..1) col.addView(cameraRow(i))
+        // Le impostazioni sono raggruppate in categorie: un elenco, e ogni voce apre la sua pagina
+        val menu = LinearLayout(this)
+        menu.orientation = LinearLayout.VERTICAL
+        outer.addView(menu)
+        val pages = ArrayList<LinearLayout>()
+        fun showPage(k: Int) {
+            menu.visibility = if (k < 0) View.VISIBLE else View.GONE
+            for ((n, pg) in pages.withIndex()) pg.visibility = if (n == k) View.VISIBLE else View.GONE
+            scroll.scrollTo(0, 0)
+        }
+        fun newPage(title: String, summary: String): LinearLayout {
+            val k = pages.size
+            val pg = LinearLayout(this)
+            pg.orientation = LinearLayout.VERTICAL
+            pg.visibility = View.GONE
+            val back = pillButton("‹ Impostazioni")
+            back.setOnClickListener { showPage(-1) }
+            pg.addView(back, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = dp(8) })
+            pg.addView(sectionTitle(title))
+            outer.addView(pg)
+            pages.add(pg)
+            val entry = LinearLayout(this)
+            entry.orientation = LinearLayout.VERTICAL
+            entry.background = roundBg(Pal.CARD, 14, this)
+            entry.setPadding(dp(16), dp(12), dp(16), dp(12))
+            val t1 = TextView(this)
+            t1.text = title
+            t1.setTextColor(Pal.TEXT)
+            t1.textSize = 17f
+            t1.typeface = Typeface.DEFAULT_BOLD
+            val t2 = TextView(this)
+            t2.text = summary
+            t2.setTextColor(Pal.MUTED)
+            t2.textSize = 13f
+            entry.addView(t1)
+            entry.addView(t2)
+            entry.setOnClickListener { showPage(k) }
+            menu.addView(entry, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = dp(8) })
+            return pg
+        }
+
+        var col = newPage("Camere", "Nomi, indirizzi IP, aggiungere o togliere camere")
+        for (i in tiles.indices) col.addView(cameraRow(i))
+        if (tiles.size < MAX_CAMS) {
+            val addRow = pillButton("+ Aggiungi camera")
+            addRow.setOnClickListener { settingsDlg?.dismiss(); addCamera() }
+            col.addView(addRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        col.addView(note("Al massimo $MAX_CAMS camere insieme: ognuna manda il suo live view via Wi-Fi e il tablet deve decodificarle tutte. Con 3 o 4 camere in orizzontale i riquadri diventano una griglia 2 × 2."))
 
         col.addView(toggleRow("Collega all'avvio le camere con IP salvato", prefs.getBoolean("auto", true)) {
             prefs.edit().putBoolean("auto", it).apply()
         })
 
-        col.addView(sectionTitle("Monitor"))
+        col = newPage("Monitor", "Zebra, focus peaking, griglia, istogramma, esposimetro")
+        val guideCol = newPage("Guide", "Guide di inquadratura, posizione, blocco, zona sicura")
         col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
         val zl = listOf(70, 80, 90, 95, 100)
         col.addView(chooserRow("Livello zebra (%)", zl.map { it.toString() }, zl.indexOf(Monitor.zebraLevel).coerceAtLeast(0)) {
@@ -2847,31 +3026,32 @@ class MainActivity : AppCompatActivity() {
             Monitor.peakColor = pc[it]; Monitor.save(prefs)
         })
         col.addView(toggleRow("Griglia dei terzi", Monitor.grid) { Monitor.grid = it; Monitor.save(prefs) })
-        col.addView(multiRow("Guide inquadratura (tocca per accendere)", Guides.names.toList(), Monitor.guides) {
+        guideCol.addView(multiRow("Guide inquadratura (tocca per accendere)", Guides.names.toList(), Monitor.guides) {
             Monitor.guides = it; Monitor.save(prefs)
         })
-        col.addView(toggleRow("Guide bloccate (si spostano solo dopo aver aperto il lucchetto sul riquadro)", Monitor.guideLock) { Monitor.guideLock = it; Monitor.save(prefs) })
-        val gcopy = pillButton("Copia posizione guide: A → B")
+        guideCol.addView(toggleRow("Guide bloccate (si spostano solo dopo aver aperto il lucchetto sul riquadro)", Monitor.guideLock) { Monitor.guideLock = it; Monitor.save(prefs) })
+        val gcopy = pillButton("Copia posizione guide: dalla prima camera alle altre")
         gcopy.setOnClickListener {
-            for (k in Guides.names.indices) Guides.pos[1][k] = Guides.pos[0][k]
+            for (c in 1 until MAX_CAMS) for (k in Guides.names.indices) Guides.pos[c][k] = Guides.pos[0][k]
             Monitor.save(prefs)
             for (t in tiles) t.refreshGuides()
-            Toast.makeText(this, "Guide di B uguali a quelle di A", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Guide di tutte le camere uguali a quelle della prima", Toast.LENGTH_SHORT).show()
         }
-        col.addView(gcopy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        guideCol.addView(gcopy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val gcenter = pillButton("Rimetti tutte le guide al centro")
         gcenter.setOnClickListener {
-            for (c in 0..1) for (k in Guides.names.indices) Guides.pos[c][k] = 0f
+            for (c in 0 until MAX_CAMS) for (k in Guides.names.indices) Guides.pos[c][k] = 0f
             Monitor.save(prefs)
             for (t in tiles) t.refreshGuides()
         }
         val gcl = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         gcl.topMargin = dp(8)
-        col.addView(gcenter, gcl)
-        col.addView(toggleRow("Zona sicura 9:16 (approssimata, segue la guida 9:16)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
+        guideCol.addView(gcenter, gcl)
+        guideCol.addView(toggleRow("Zona sicura 9:16 (approssimata, segue la guida 9:16)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
         col.addView(toggleRow("Istogramma", Monitor.histogram) { Monitor.histogram = it; Monitor.save(prefs) })
         col.addView(toggleRow("Esposimetro (stimato dall'immagine)", Monitor.meter) { Monitor.meter = it; Monitor.save(prefs) })
 
+        col = newPage("Parametri camera", "Esposizione, misurazione, bilanciamento del bianco (camere collegate)")
         val params = LinearLayout(this)
         params.orientation = LinearLayout.VERTICAL
         col.addView(params)
@@ -2879,8 +3059,8 @@ class MainActivity : AppCompatActivity() {
         fillParams(params)
         settingsSig = paramSig()
 
-        val markTitle = sectionTitle("Take e segni")
-        col.addView(markTitle)
+        col = newPage("Take e segni", "Elenco take, esportazione per Premiere, scheda sessione")
+        val alertCol = newPage("Avvisi e tally", "Tally grande, REC non allineato, batteria e memoria")
         val markText = TextView(this)
         markText.setTextColor(Pal.TEXT)
         markText.textSize = 12.5f
@@ -2907,15 +3087,15 @@ class MainActivity : AppCompatActivity() {
         col.addView(chooserRow("Ritardo rilevamento REC (ms)", lags.map { it.toString() }, lags.indexOf(prefs.getInt("reclag", 300)).coerceAtLeast(0)) {
             prefs.edit().putInt("reclag", lags[it]).apply()
         })
-        col.addView(toggleRow("Tally grande (bordo rosso su tutto lo schermo in REC)", prefs.getBoolean("tally", true)) {
+        alertCol.addView(toggleRow("Tally grande (bordo rosso su tutto lo schermo in REC)", prefs.getBoolean("tally", true)) {
             prefs.edit().putBoolean("tally", it).apply()
             applyTally()
         })
 
-        col.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se l'altra registra)", prefs.getBoolean("alignwarn", true)) {
+        alertCol.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se un'altra camera registra)", prefs.getBoolean("alignwarn", true)) {
             prefs.edit().putBoolean("alignwarn", it).apply()
         })
-        col.addView(toggleRow("Avviso batteria (sotto 15%, lampeggia) e memoria in esaurimento; vibrazione e suono solo fuori dal REC", prefs.getBoolean("lowalert", true)) {
+        alertCol.addView(toggleRow("Avviso batteria (sotto 15%, lampeggia) e memoria in esaurimento; vibrazione e suono solo fuori dal REC", prefs.getBoolean("lowalert", true)) {
             prefs.edit().putBoolean("lowalert", it).apply()
         })
 
@@ -2959,7 +3139,7 @@ class MainActivity : AppCompatActivity() {
         mclp.topMargin = dp(8)
         col.addView(mcard, mclp)
 
-        col.addView(sectionTitle("Aggiornamenti"))
+        col = newPage("Aggiornamenti", "Versione installata e ricerca aggiornamenti")
         col.addView(note("Versione installata: ${installedName()}"))
         col.addView(toggleRow("Cerca aggiornamenti all'avvio", prefs.getBoolean("autoupd", true)) {
             prefs.edit().putBoolean("autoupd", it).apply()
@@ -2970,6 +3150,7 @@ class MainActivity : AppCompatActivity() {
         ulp.topMargin = dp(6)
         col.addView(updCheck, ulp)
 
+        col = newPage("Test e diagnostica", "Camere simulate, log, copia diagnostica")
         col.addView(sectionTitle("Modalità test"))
         val testBtn = pillButton(if (simOn) "Camere simulate: ACCESE  ▸" else "Camere simulate (PIN)  ▸")
         testBtn.setOnClickListener {
@@ -2982,7 +3163,7 @@ class MainActivity : AppCompatActivity() {
         }
         col.addView(testBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val testHint = TextView(this)
-        testHint.text = "Due camere finte con immagine, REC, valori, batteria e memoria che scendono in fretta. Si spegne da sola alla riapertura dell'app."
+        testHint.text = "Camere finte con immagine, REC, valori, batteria e memoria che scendono in fretta. Si spegne da sola alla riapertura dell'app."
         testHint.setTextColor(Pal.MUTED)
         testHint.textSize = 13f
         testHint.setPadding(0, dp(6), 0, 0)
@@ -3001,16 +3182,17 @@ class MainActivity : AppCompatActivity() {
         val cl = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         cl.topMargin = dp(18)
         cl.gravity = Gravity.END
-        col.addView(close, cl)
+        outer.addView(close, cl)
 
         val dlg = Dialog(this)
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dlg.setContentView(scroll)
         dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
-        dlg.setOnDismissListener { settingsDlg = null; settingsParams = null; stopBtns[0] = null; stopBtns[1] = null }
+        dlg.setOnDismissListener { settingsDlg = null; settingsParams = null; stopBtns.fill(null) }
         close.setOnClickListener { dlg.dismiss() }
         logBtn.setOnClickListener { dlg.dismiss(); showLog(true) }
         settingsDlg = dlg
+        if (openPage in pages.indices) showPage(openPage)
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
         dlg.window?.setLayout(dlgWidth(0.6f), (resources.displayMetrics.heightPixels * 0.85f).toInt())
@@ -3027,7 +3209,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun paramSig(): String {
         val sb = StringBuilder()
-        for (i in 0..1) {
+        for (i in tiles.indices) {
             sb.append(if (liveNow[i]) 'L' else '-')
             val m = cams[i]?.props ?: continue
             for (c in paramCodes) sb.append(m[c]?.current).append(',').append(m[c]?.settable).append(';')
@@ -3047,11 +3229,11 @@ class MainActivity : AppCompatActivity() {
         row.layoutParams = rlp
 
         val dot = View(this)
-        dot.background = roundBg(if (i == 0) Pal.COLD else Pal.HOT, 10, this)
+        dot.background = roundBg(camColor(i), 10, this)
         row.addView(dot, LinearLayout.LayoutParams(dp(20), dp(20)))
 
         val name = EditText(this)
-        name.hint = if (i == 0) "Camera A" else "Camera B"
+        name.hint = "Camera ${'A' + i}"
         name.setHintTextColor(Pal.MUTED)
         name.setTextColor(Pal.TEXT)
         name.textSize = 15f
@@ -3096,11 +3278,16 @@ class MainActivity : AppCompatActivity() {
         stop.setOnClickListener { toggle(i) }
         stopBtns[i] = stop
         row.addView(stop)
+        if (i >= 2 && i == tiles.size - 1) {
+            val rm = pillButton("Rimuovi")
+            rm.setOnClickListener { removeLastCamera() }
+            row.addView(rm, spaced(6))
+        }
         return row
     }
 
     private fun refreshSettings() {
-        for (i in 0..1) stopBtns[i]?.visibility = if (cams[i] != null) View.VISIBLE else View.GONE
+        for (i in 0 until MAX_CAMS) stopBtns[i]?.visibility = if (cams[i] != null) View.VISIBLE else View.GONE
         val params = settingsParams ?: return
         val sig = paramSig()
         if (sig == settingsSig) return
@@ -3111,7 +3298,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun fillParams(container: LinearLayout) {
         var any = false
-        for (i in 0..1) {
+        for (i in tiles.indices) {
             val cam = cams[i]
             if (cam == null || !liveNow[i]) continue
             any = true
@@ -3272,9 +3459,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun copyDiagnostics() {
         val sb = StringBuilder()
-        for (i in 0..1) {
+        for (i in 0 until MAX_CAMS) {
             val m = cams[i]?.props ?: continue
-            sb.append("== Camera ").append(if (i == 0) "A" else "B").append(" (").append(m.size).append(" proprietà)\n")
+            sb.append("== Camera ").append('A' + i).append(" (").append(m.size).append(" proprietà)\n")
             for (p in m.values) {
                 sb.append(String.format(Locale.ROOT, "%04X t=%X gs=%d en=%d cur=%X opts=%d",
                     p.code, p.type, p.getSet, p.enabledFlag, p.current, p.options.size))
@@ -3295,7 +3482,7 @@ class MainActivity : AppCompatActivity() {
     /** Accende o spegne le camere finte: ferma le camere in corso e le ricollega nel nuovo modo. */
     private fun setSim(on: Boolean) {
         if (on == simOn) return
-        for (i in 0..1) { cams[i]?.stop(); cams[i] = null }
+        for (i in 0 until MAX_CAMS) { cams[i]?.stop(); cams[i] = null }
         simOn = on
         addLog(if (on) "MODALITA' TEST accesa: camere simulate" else "Modalità test spenta")
         Toast.makeText(this, if (on) "Modalità test: tocca Connetti sui riquadri" else "Modalità test spenta", Toast.LENGTH_LONG).show()
@@ -3409,7 +3596,7 @@ class MainActivity : AppCompatActivity() {
         refreshSettings()
     }
 
-    private val lastHeat = LongArray(2)
+    private val lastHeat = LongArray(MAX_CAMS)
 
     /** Ricorda batteria e memoria lette (per la scheda sessione) e controlla l'avviso di temperatura, se la camera lo espone. */
     private fun noteInfo(i: Int, m: Map<Int, Prop>) {
