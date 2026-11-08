@@ -52,7 +52,7 @@ class SpringFloat(
 object Springs {
 
     /** Effetto "pressione" stile iOS: il tocco rimpicciolisce la vista, il rilascio la fa tornare con rimbalzo. */
-    fun pressable(v: View, pressed: Float = 0.96f, onTouch: ((MotionEvent) -> Unit)? = null) {
+    fun pressable(v: View, pressed: Float = 0.96f) {
         val sx = SpringAnimation(v, DynamicAnimation.SCALE_X)
         val sy = SpringAnimation(v, DynamicAnimation.SCALE_Y)
         val fx = SpringForce(1f)
@@ -66,7 +66,6 @@ object Springs {
         sy.setSpring(fy)
         sy.setMinimumVisibleChange(DynamicAnimation.MIN_VISIBLE_CHANGE_SCALE)
         v.setOnTouchListener { _, e ->
-            onTouch?.invoke(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     sx.animateToFinalPosition(pressed)

@@ -22,9 +22,6 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.Settings
 import android.os.SystemClock
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -443,7 +440,7 @@ class GuidesView(ctx: Context) : View(ctx) {
 
 /** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
 class IconButton(ctx: Context) : View(ctx) {
-    enum class Kind { CAMERA, SHARE, LAYERS, ZEBRA, PEAK }
+    enum class Kind { CAMERA, SHARE, LAYERS }
 
     var kind = Kind.CAMERA
         set(v) { field = v; invalidate() }
@@ -488,21 +485,6 @@ class IconButton(ctx: Context) : View(ctx) {
             Kind.LAYERS -> {
                 c.drawRoundRect(w * 0.28f, h * 0.26f, w * 0.62f, h * 0.58f, w * 0.05f, w * 0.05f, stroke)
                 c.drawRoundRect(w * 0.38f, h * 0.42f, w * 0.72f, h * 0.74f, w * 0.05f, w * 0.05f, stroke)
-            }
-            Kind.ZEBRA -> {
-                // strisce oblique dentro un quadrato
-                c.drawRoundRect(w * 0.27f, h * 0.27f, w * 0.73f, h * 0.73f, w * 0.05f, w * 0.05f, stroke)
-                c.drawLine(w * 0.27f, h * 0.55f, w * 0.55f, h * 0.27f, stroke)
-                c.drawLine(w * 0.27f, h * 0.73f, w * 0.73f, h * 0.27f, stroke)
-                c.drawLine(w * 0.45f, h * 0.73f, w * 0.73f, h * 0.45f, stroke)
-            }
-            Kind.PEAK -> {
-                // profilo di una montagna con un punto: il bordo a fuoco
-                c.drawLine(w * 0.24f, h * 0.70f, w * 0.42f, h * 0.36f, stroke)
-                c.drawLine(w * 0.42f, h * 0.36f, w * 0.54f, h * 0.56f, stroke)
-                c.drawLine(w * 0.54f, h * 0.56f, w * 0.64f, h * 0.44f, stroke)
-                c.drawLine(w * 0.64f, h * 0.44f, w * 0.76f, h * 0.70f, stroke)
-                c.drawCircle(w * 0.42f, h * 0.30f, w * 0.045f, fill)
             }
         }
     }
@@ -569,9 +551,6 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val side = LinearLayout(ctx)
     private val shotBtn = IconButton(ctx)
     private val ovlBtn = IconButton(ctx)
-    private val zebraBtn = IconButton(ctx)
-    private val peakBtn = IconButton(ctx)
-    private var quickOn = true
     private val ovlPanel = LinearLayout(ctx)
     private val ovlLabel = TextView(ctx)
     private val ovlSeek = SeekBar(ctx)
@@ -608,6 +587,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     var onGiveUp: (() -> Unit)? = null
     /** Chiamata quando la camera inizia (true) o finisce (false) di registrare. */
     var onRecChange: ((Boolean) -> Unit)? = null
+    var onLevels: ((Int?, Long?) -> Unit)? = null
     var onConnect: (() -> Unit)? = null
     var onPick: ((Prop, Long) -> Unit)? = null
 
@@ -905,27 +885,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlBtn.setOnClickListener {
             ovlPanel.visibility = if (ovlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        zebraBtn.kind = IconButton.Kind.ZEBRA
-        zebraBtn.active = Monitor.zebra
-        zebraBtn.setOnClickListener {
-            Monitor.zebra = !Monitor.zebra
-            zebraBtn.active = Monitor.zebra
-            onGuideSave?.invoke()
-        }
-        peakBtn.kind = IconButton.Kind.PEAK
-        peakBtn.active = Monitor.peaking
-        peakBtn.setOnClickListener {
-            Monitor.peaking = !Monitor.peaking
-            peakBtn.active = Monitor.peaking
-            onGuideSave?.invoke()
-        }
-        side.addView(zebraBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
-        val pkBtnLp = LinearLayout.LayoutParams(dp(34), dp(34))
-        pkBtnLp.leftMargin = dp(8)
-        side.addView(peakBtn, pkBtnLp)
-        val shLp = LinearLayout.LayoutParams(dp(34), dp(34))
-        shLp.leftMargin = dp(8)
-        side.addView(shotBtn, shLp)
+        side.addView(shotBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
         val ovlLp = LinearLayout.LayoutParams(dp(34), dp(34))
         ovlLp.leftMargin = dp(8)
         side.addView(ovlBtn, ovlLp)
@@ -1032,7 +992,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (on) {
             for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (hasFrame && !lost) {
-            side.visibility = if (quickOn) View.VISIBLE else View.GONE
+            side.visibility = View.VISIBLE
             lag.visibility = View.VISIBLE
             overlayImg.visibility = if (overlayBmp != null) View.VISIBLE else View.GONE
         }
@@ -1054,29 +1014,6 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             lostBox.visibility = View.GONE
             img.alpha = 1f
             batt.alpha = 1f
-        }
-    }
-
-    private var battLow = false
-    private var battWarn = false
-    private var battPhase = true
-    private val battBlink = object : Runnable {
-        override fun run() {
-            battPhase = !battPhase
-            paintBatt()
-            if (battLow && recording) postDelayed(this, 500)
-        }
-    }
-
-    /** Batteria o memoria in esaurimento: rosso fisso; durante il REC lampeggia in rosso (niente suoni, che rientrerebbero nel microfono). */
-    private fun paintBatt() {
-        removeCallbacks(battBlink)
-        if (battLow && recording) {
-            batt.setTextColor(if (battPhase) 0xFFFF1744.toInt() else 0x66FF1744)
-            postDelayed(battBlink, 500)
-        } else {
-            battPhase = true
-            batt.setTextColor(if (battLow) 0xFFEF5350.toInt() else if (battWarn) Pal.MID else Pal.TEXT)
         }
     }
 
@@ -1106,13 +1043,6 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         sceneV.visibility = if (show) View.VISIBLE else View.GONE
         val t = "🎬 $sceneText"
         if (show && sceneV.text.toString() != t) sceneV.text = t
-    }
-
-    /** Mostra o nasconde i tasti rapidi sotto il live view (zebra, peaking, screenshot, sovrapposizione). */
-    fun setQuick(on: Boolean) {
-        quickOn = on
-        if (!on) { side.visibility = View.GONE; ovlPanel.visibility = View.GONE }
-        else if (hasFrame && !lost && !shoot) side.visibility = View.VISIBLE
     }
 
     /** Pulsanti screenshot e sovrapposizione dal lato esterno: a destra per il riquadro di destra, a sinistra per quello di sinistra. */
@@ -1152,7 +1082,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         img.setImageBitmap(b)
         lastFrame = b
         hasFrame = true
-        side.visibility = if (shoot || !quickOn) View.GONE else View.VISIBLE
+        side.visibility = if (shoot) View.GONE else View.VISIBLE
         overlayImg.visibility = if (overlayBmp != null && !shoot) View.VISIBLE else View.GONE
         msgBox.visibility = View.GONE
         lag.visibility = if (shoot) View.GONE else View.VISIBLE
@@ -1171,8 +1101,6 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         updateGuideBar()
         guideV.invalidate()
 
-        zebraBtn.active = Monitor.zebra
-        peakBtn.active = Monitor.peaking
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
         zebraImg.visibility = if (z != null && !shoot) View.VISIBLE else View.GONE
@@ -1300,17 +1228,15 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (valid.isEmpty()) parts.add("💾 —")
         else parts.add("💾 " + mem.mapIndexedNotNull { i, s -> if (s == null) null else (if (mem.size > 1 && valid.size > 1) "${i + 1}: " else "") + SonyProps.fmtRemain(s) }.joinToString("  "))
         batt.text = parts.joinToString("   ")
-        val lowBat = bl != null && bl <= 15
-        val lowMem = valid.isNotEmpty() && valid.maxOrNull()!! <= 600
-        val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.maxOrNull()!! < 1200)
-        battLow = lowBat || lowMem
-        battWarn = warn
-        paintBatt()
+        val lowBat = bl != null && bl <= 10
+        val lowMem = valid.isNotEmpty() && valid.minOrNull()!! < 600
+        val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.minOrNull()!! < 1200)
+        batt.setTextColor(if (lowBat || lowMem) 0xFFEF5350.toInt() else if (warn) Pal.MID else Pal.TEXT)
         batt.visibility = View.VISIBLE
+        onLevels?.invoke(bl, valid.minOrNull())
         val r = (m[SonyProps.REC_STATE]?.current ?: 0L) != 0L
         if (r != recording) {
             recording = r
-            paintBatt()
             recBtn.pending = false
             recBtn.recording = r
             foreground = if (r) borderRed else null
@@ -1565,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
         noteBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
         noteBtn.setTextColor(Pal.BG)
         noteBtn.setOnClickListener { noteDialog() }
-        attachVoice(noteBtn)
+        noteBtn.setOnLongClickListener { voiceNote(); true }
         sceneBtn = pillButton("🎬 Scena")
         sceneBtn.maxWidth = dp(260)
         sceneBtn.maxLines = 1
@@ -1575,7 +1501,7 @@ class MainActivity : AppCompatActivity() {
         modeBtn.setOnClickListener { setShootMode(!shootMode) }
         bar.addView(sceneBtn, spaced(10))
         val kelvinBtn = pillButton("🌡 Kelvin")
-        kelvinBtn.setOnClickListener { kelvinLauncher.launch(android.content.Intent(this, KelvinActivity::class.java)) }
+        kelvinBtn.setOnClickListener { openKelvin() }
         bar.addView(kelvinBtn, spaced(10))
         bar.addView(syncBtn, spaced(10))
         bar.addView(goodBtn, spaced(6))
@@ -1613,6 +1539,7 @@ class MainActivity : AppCompatActivity() {
             t.onRec = { cams[i]?.toggleRec() }
             t.onGiveUp = { giveUp(i) }
             t.onRecChange = { r -> onRecChange(i, r) }
+            t.onLevels = { bl, mem -> checkLevels(i, bl, mem) }
             t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
             t.setOnClickListener {
@@ -1625,7 +1552,6 @@ class MainActivity : AppCompatActivity() {
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         tiles[0].setSide(false)
         tiles[1].setSide(true)
-        for (t in tiles) t.setQuick(prefs.getBoolean("quickbtns", true))
         for (i in 0..1) {
             val f = overlayFile(i)
             val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
@@ -1658,7 +1584,7 @@ class MainActivity : AppCompatActivity() {
         shootRow = LinearLayout(this)
         shootRow.orientation = LinearLayout.HORIZONTAL
         shootRow.visibility = View.GONE
-        fun bigMark(text: String, cat: Int, action: () -> Unit) {
+        fun bigMark(text: String, cat: Int, longAction: (() -> Unit)? = null, action: () -> Unit) {
             val b = MaterialButton(this)
             b.text = text
             b.isAllCaps = false
@@ -1670,14 +1596,15 @@ class MainActivity : AppCompatActivity() {
             b.insetTop = 0
             b.insetBottom = 0
             b.setOnClickListener { action() }
-            if (cat == MarkCat.NOTE) attachVoice(b) else Springs.pressable(b)
+            if (longAction != null) b.setOnLongClickListener { longAction(); true }
+            Springs.pressable(b)
             val lp = LinearLayout.LayoutParams(0, dp(76), 1f)
             if (shootRow.childCount > 0) lp.leftMargin = dp(10)
             shootRow.addView(b, lp)
         }
         bigMark("⚑ Buona", MarkCat.GOOD) { addMark(MarkCat.GOOD, "") }
         bigMark("⚑ Scarto", MarkCat.BAD) { addMark(MarkCat.BAD, "") }
-        bigMark("⚑ Nota", MarkCat.NOTE) { noteDialog() }
+        bigMark("⚑ Nota", MarkCat.NOTE, { voiceNote() }) { noteDialog() }
         val srp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         srp.topMargin = dp(10)
         root.addView(shootRow, srp)
@@ -1688,7 +1615,7 @@ class MainActivity : AppCompatActivity() {
         paintScene()
         setShootMode(prefs.getBoolean("shoot", false))
         rootView.postDelayed(alignRun, 500)
-        addLog("Doppia 1.14: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
+        addLog("Doppia 1.8: Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -1704,7 +1631,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        try { recognizer?.destroy() } catch (_: Throwable) {}
         rootView.removeCallbacks(alignRun)
         for (i in 0..1) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
         for (i in 0..1) cams[i]?.stop()
@@ -2142,8 +2068,8 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Avvisi: vibrazione, suono, REC non allineato ----------
 
-    private fun buzz(sound: Boolean = true, vibrate: Boolean = true) {
-        if (vibrate) try {
+    private fun buzz() {
+        try {
             val v = if (Build.VERSION.SDK_INT >= 31) {
                 (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
             } else {
@@ -2152,19 +2078,43 @@ class MainActivity : AppCompatActivity() {
             }
             if (v.hasVibrator()) v.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250, 120, 450), -1))
         } catch (_: Throwable) {}
-        if (sound && prefs.getBoolean("alertsound", true)) try {
+        try {
             val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90)
             tg.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 700)
             rootView.postDelayed({ try { tg.release() } catch (_: Throwable) {} }, 1500)
         } catch (_: Throwable) {}
     }
 
+    private val lowLvl = IntArray(2)
+
+    /** Batteria o memoria in esaurimento: avviso con vibrazione e suono una volta per livello (batteria 20% e 10%, memoria 15 e 10 minuti). */
+    private fun checkLevels(i: Int, bl: Int?, mem: Long?) {
+        if (!prefs.getBoolean("lowalert", true)) return
+        var lvl = 0
+        var why = ""
+        if (bl != null) {
+            if (bl <= 10) { lvl = 2; why = "Batteria quasi scarica: $bl%" }
+            else if (bl <= 20) { lvl = 1; why = "Batteria bassa: $bl%" }
+        }
+        if (mem != null) {
+            val ml = if (mem < 600L) 2 else if (mem < 900L) 1 else 0
+            if (ml > lvl) {
+                lvl = ml
+                why = (if (ml == 2) "Memoria quasi piena" else "Poca memoria") + ": restano " + SonyProps.fmtRemain(mem)
+            }
+        }
+        if (lvl > lowLvl[i]) {
+            lowLvl[i] = lvl
+            alertCam(i, why)
+        } else if (lvl == 0) {
+            lowLvl[i] = 0
+        }
+    }
+
     /** Avviso sul riquadro della camera i, con vibrazione e suono. */
-    private fun alertCam(i: Int, text: String, quietInRec: Boolean = false) {
+    private fun alertCam(i: Int, text: String) {
         addLog("AVVISO ${camName(i)}: $text")
         tiles[i].showAlert("⚠ $text")
-        // avvisi di batteria e memoria: se una camera registra niente suono e niente vibrazione (rientrerebbero nel microfono), lampeggia la percentuale
-        if (quietInRec && tiles.any { it.recording }) return
         buzz()
     }
 
@@ -2236,14 +2186,57 @@ class MainActivity : AppCompatActivity() {
         else -> paramNames[code]?.lowercase(Locale.ROOT) ?: "parametro"
     }
 
-    private val kelvinLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        val k = r.data?.getIntExtra("k", 0) ?: 0
-        if (r.resultCode == android.app.Activity.RESULT_OK && k > 0) applyKelvin(k)
+    // ---------- Misuratore Kelvin (finestra) ----------
+
+    private var camPermCb: ((Boolean) -> Unit)? = null
+    private val camPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> camPermCb?.invoke(ok) }
+    private var kelvinPanel: KelvinPanel? = null
+
+    private val kelvinHost = object : KelvinHost {
+        override val activity: androidx.appcompat.app.AppCompatActivity get() = this@MainActivity
+        override fun camLabel(i: Int): String = camName(i)
+        override fun isLive(i: Int): Boolean = cams[i] != null && liveNow[i]
+        override fun frame(i: Int): Bitmap? = tiles[i].frame()
+        override fun wbKelvin(i: Int): Int? = wbKelvinOf(i)
+        override fun applyKelvin(k: Int, targets: List<Int>) = this@MainActivity.applyKelvin(k, targets)
+        override fun askCameraPermission(done: (Boolean) -> Unit) {
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                done(true)
+            } else {
+                camPermCb = done
+                camPerm.launch(android.Manifest.permission.CAMERA)
+            }
+        }
+        override fun dialogWidth(landscapeFraction: Float): Int = dlgWidth(landscapeFraction)
+        override fun portrait(): Boolean = isPortrait()
+        override fun onKelvinClosed() { kelvinPanel = null }
     }
 
-    /** Imposta il bilanciamento del bianco in temperatura colore e i Kelvin misurati su ogni camera live. */
-    private fun applyKelvin(k: Int) {
-        val live = (0..1).filter { cams[it] != null && liveNow[it] }
+    private fun openKelvin() {
+        if (kelvinPanel != null) return
+        val panel = KelvinPanel(kelvinHost)
+        kelvinPanel = panel
+        panel.show()
+    }
+
+    /** Kelvin del bilanciamento del bianco della camera i: valore impostato o preset noto; null se Auto o sconosciuto. */
+    private fun wbKelvinOf(i: Int): Int? {
+        val cam = cams[i] ?: return null
+        val wb = cam.props[SonyProps.WB] ?: return null
+        return when (wb.current) {
+            SonyProps.WB_KELVIN -> cam.props[SonyProps.KELVIN]?.current?.toInt()?.takeIf { it in 1500..12000 }
+            4L -> 5500       // luce diurna
+            7L -> 5500       // flash
+            0x8010L -> 6500  // nuvoloso
+            0x8011L -> 7500  // ombra
+            6L -> 3200       // incandescenza
+            else -> null
+        }
+    }
+
+    /** Imposta il bilanciamento del bianco in temperatura colore e i Kelvin misurati sulle camere indicate (se live). */
+    private fun applyKelvin(k: Int, targets: List<Int>) {
+        val live = targets.filter { cams[it] != null && liveNow[it] }
         if (live.isEmpty()) {
             val msg = "Nessuna camera live: collega almeno una camera per impostare $k K"
             addLog(msg)
@@ -2336,123 +2329,152 @@ class MainActivity : AppCompatActivity() {
         paintRecAll()
     }
 
-    /** Segna un momento sul take in corso di ogni camera che registra (tempo dall'inizio del take). */
-    private fun addMark(cat: Int, note: String, backMs: Long = 0L) {
+    /** Momento del segno: ora e tempo dall'inizio del take di ogni camera che registra. */
+    private class MarkAt(val wall: Long, val refs: List<Ref>, val times: String)
+
+    private fun captureMark(): MarkAt {
         val lag = prefs.getInt("reclag", 300)
         val refs = ArrayList<Ref>()
-        val sb = StringBuilder(MarkCat.names[cat])
-        if (note.isNotEmpty()) sb.append(": ").append(note)
+        val sb = StringBuilder()
         for (i in 0..1) {
             val ms = tiles[i].recElapsedMs()
             val tk = Session.openTake(i)
             if (ms < 0L || tk == null) continue
-            val off = (ms + lag - backMs).coerceAtLeast(0L)
+            val off = ms + lag
             refs.add(Ref(i, tk.num, off))
             sb.append("   ").append(camName(i)).append(' ').append(tc((off / 1000L).toInt()))
         }
         if (refs.isEmpty()) sb.append("   (nessuna camera in REC)")
-        Session.addMark(Mark(System.currentTimeMillis(), cat, note, refs))
+        return MarkAt(System.currentTimeMillis(), refs, sb.toString())
+    }
+
+    private fun commitMark(cat: Int, note: String, m: MarkAt) {
+        val sb = StringBuilder(MarkCat.names[cat])
+        if (note.isNotEmpty()) sb.append(": ").append(note)
+        sb.append(m.times)
+        Session.addMark(Mark(m.wall, cat, note, m.refs))
         Session.save(prefs)
         addLog("Segno: $sb")
         Toast.makeText(this, "⚑ $sb", Toast.LENGTH_SHORT).show()
     }
 
-    // ---- Nota vocale: tieni premuto ⚑ Nota, parla, rilascia ----
-    private var recognizer: SpeechRecognizer? = null
-    private var voiceActive = false
-    private var voiceStartAt = 0L
-    private var voiceGotResult = false
+    /** Segna un momento sul take in corso di ogni camera che registra (tempo dall'inizio del take). */
+    private fun addMark(cat: Int, note: String) = commitMark(cat, note, captureMark())
 
-    /** Tocco breve = finestra Nota. Tenuto premuto = si detta (riconoscimento vocale Android in italiano), al rilascio il testo diventa la nota. */
-    private fun attachVoice(b: View) {
-        Springs.pressable(b) { e ->
-            if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) && voiceActive) {
-                try { recognizer?.stopListening() } catch (_: Throwable) {}
-            }
-        }
-        b.setOnLongClickListener {
-            b.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            startVoiceNote()
-            true
-        }
-    }
+    // ---------- Note vocali ----------
 
-    private fun startVoiceNote() {
-        if (voiceActive) return
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 7)
-            Toast.makeText(this, "Consenti il microfono, poi tieni premuto di nuovo ⚑ Nota", Toast.LENGTH_LONG).show()
-            return
-        }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(this, "Il riconoscimento vocale non e' disponibile su questo tablet: scrivi la nota", Toast.LENGTH_LONG).show()
-            addLog("Nota vocale: riconoscimento vocale non disponibile")
+    private var recog: android.speech.SpeechRecognizer? = null
+    private var voiceDlg: Dialog? = null
+    private var micCb: ((Boolean) -> Unit)? = null
+    private val micPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> micCb?.invoke(ok) }
+
+    /** Nota detta a voce: il momento del segno e' quello della pressione, il testo arriva dopo. */
+    private fun voiceNote(at: MarkAt = captureMark()) {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Dettatura non disponibile su questo dispositivo: nota scritta", Toast.LENGTH_LONG).show()
             noteDialog()
             return
         }
-        voiceStartAt = SystemClock.elapsedRealtime()
-        voiceGotResult = false
-        voiceActive = true
-        try { recognizer?.destroy() } catch (_: Throwable) {}
-        val r = SpeechRecognizer.createSpeechRecognizer(this)
-        recognizer = r
-        r.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                Toast.makeText(this@MainActivity, "🎤 Parla, rilascia per finire", Toast.LENGTH_SHORT).show()
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            micCb = { ok ->
+                if (ok) startVoice(at) else {
+                    Toast.makeText(this, "Serve il permesso microfono per dettare: nota scritta", Toast.LENGTH_LONG).show()
+                    noteDialog()
+                }
             }
+            micPerm.launch(android.Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        startVoice(at)
+    }
+
+    private fun stopVoice() {
+        try { recog?.cancel() } catch (_: Throwable) {}
+        try { recog?.destroy() } catch (_: Throwable) {}
+        recog = null
+        try { voiceDlg?.dismiss() } catch (_: Throwable) {}
+        voiceDlg = null
+    }
+
+    private fun finishVoice(at: MarkAt, text: String, msg: String?) {
+        if (recog == null) return
+        stopVoice()
+        commitMark(MarkCat.NOTE, text, at)
+        if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
+
+    private fun startVoice(at: MarkAt) {
+        stopVoice()
+        val sr = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+        recog = sr
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(22), dp(18), dp(22), dp(18))
+        val head = TextView(this)
+        head.text = "🎤 Parla ora"
+        head.setTextColor(Pal.TEXT)
+        head.textSize = 20f
+        head.typeface = Typeface.DEFAULT_BOLD
+        col.addView(head)
+        val tv = TextView(this)
+        tv.text = "…"
+        tv.setTextColor(Pal.MUTED)
+        tv.textSize = 16f
+        tv.setPadding(0, dp(10), 0, dp(10))
+        col.addView(tv)
+        val row = FlowRow(this, dp(8))
+        val fine = pillButton("Fine")
+        fine.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
+        fine.setTextColor(Pal.BG)
+        fine.setOnClickListener { try { sr.stopListening() } catch (_: Throwable) {} }
+        val canc = pillButton("Annulla")
+        canc.setOnClickListener { stopVoice() }
+        row.addView(fine)
+        row.addView(canc)
+        col.addView(row)
+
+        val d = Dialog(this)
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        d.setContentView(col)
+        d.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        d.setOnCancelListener { stopVoice() }
+        voiceDlg = d
+        d.show()
+        d.window?.setLayout(dlgWidth(0.45f), ViewGroup.LayoutParams.WRAP_CONTENT)
+
+        sr.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                val l = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!l.isNullOrEmpty()) tv.text = l[0]
+            }
             override fun onResults(results: Bundle?) {
-                if (voiceGotResult) return
-                voiceGotResult = true
-                voiceActive = false
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
-                finishVoice(text)
+                val l = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                finishVoice(at, l?.firstOrNull()?.trim().orEmpty(), null)
             }
             override fun onError(error: Int) {
-                if (voiceGotResult) return
-                voiceGotResult = true
-                voiceActive = false
-                addLog("Nota vocale: errore $error")
-                finishVoice("")
+                val msg = if (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                    "Nessun testo riconosciuto: segno aggiunto senza nota"
+                else "Dettatura non riuscita (errore $error): segno aggiunto senza testo"
+                finishVoice(at, "", msg)
             }
         })
-        val ri = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-        ri.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        ri.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
-        ri.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-        ri.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        try { r.startListening(ri) } catch (t: Throwable) {
-            voiceActive = false
-            addLog("Nota vocale: ${t.message}")
-            noteDialog()
-        }
-    }
-
-    /** Il segno prende l'istante in cui hai iniziato a tenere premuto, non quello in cui il testo e' pronto. */
-    private fun finishVoice(text: String) {
-        val back = SystemClock.elapsedRealtime() - voiceStartAt
-        val note = if (text.isEmpty()) "(nota vocale non capita)" else text
-        addMark(MarkCat.NOTE, note, back)
-    }
-
-    // ---- Avvisi batteria e memoria in esaurimento ----
-    private val lowBatSent = BooleanArray(2)
-    private val lowMemSent = BooleanArray(2)
-
-    private fun checkLow(i: Int, bl: Int?, memSec: Long?) {
-        if (!prefs.getBoolean("lowwarn", true)) return
-        if (bl != null) {
-            if (bl <= 15 && !lowBatSent[i]) { lowBatSent[i] = true; alertCam(i, "Batteria bassa: $bl%", true) }
-            else if (bl > 20) lowBatSent[i] = false
-        }
-        if (memSec != null) {
-            if (memSec <= 600L && !lowMemSent[i]) { lowMemSent[i] = true; alertCam(i, "Memoria in esaurimento: ${SonyProps.fmtRemain(memSec)}", true) }
-            else if (memSec > 900L) lowMemSent[i] = false
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        try {
+            sr.startListening(intent)
+        } catch (e: Throwable) {
+            finishVoice(at, "", "Dettatura non avviata: segno aggiunto senza testo")
         }
     }
 
@@ -2468,14 +2490,26 @@ class MainActivity : AppCompatActivity() {
         head.typeface = Typeface.DEFAULT_BOLD
         col.addView(head)
 
+        val at = captureMark()
         val dlg = Dialog(this)
         fun done(text: String) {
             dlg.dismiss()
-            addMark(MarkCat.NOTE, text.trim())
+            commitMark(MarkCat.NOTE, text.trim(), at)
         }
 
         val chips = LinearLayout(this)
         chips.orientation = LinearLayout.HORIZONTAL
+        run {
+            val c = TextView(this)
+            c.text = "🎤 Detta"
+            c.setTextColor(Pal.BG)
+            c.textSize = 15f
+            c.typeface = Typeface.DEFAULT_BOLD
+            c.setPadding(dp(14), dp(9), dp(14), dp(9))
+            c.background = roundBg(Pal.MID, 16, this)
+            c.setOnClickListener { dlg.dismiss(); voiceNote(at) }
+            chips.addView(c, spaced(8))
+        }
         for (q in listOf("Audio sporco", "Fuori fuoco", "Rifare", "Taglio qui", "Ottima")) {
             val c = TextView(this)
             c.text = q
@@ -2644,8 +2678,7 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         applyOrientation()
-        settingsSig = ""
-        refreshSettings()
+        kelvinPanel?.relayout()
     }
 
     /** Larghezza dei dialoghi: in verticale quasi tutto lo schermo. */
@@ -2688,10 +2721,6 @@ class MainActivity : AppCompatActivity() {
         })
 
         col.addView(sectionTitle("Monitor"))
-        col.addView(toggleRow("Tasti rapidi sotto il live view (zebra, peaking, screenshot, sovrapposizione)", prefs.getBoolean("quickbtns", true)) {
-            prefs.edit().putBoolean("quickbtns", it).apply()
-            for (t in tiles) t.setQuick(it)
-        })
         col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
         val zl = listOf(70, 80, 90, 95, 100)
         col.addView(chooserRow("Livello zebra (%)", zl.map { it.toString() }, zl.indexOf(Monitor.zebraLevel).coerceAtLeast(0)) {
@@ -2771,13 +2800,8 @@ class MainActivity : AppCompatActivity() {
         col.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se l'altra registra)", prefs.getBoolean("alignwarn", true)) {
             prefs.edit().putBoolean("alignwarn", it).apply()
         })
-
-        col.addView(toggleRow("Avviso batteria sotto il 15% e memoria sotto i 10 minuti (vibrazione e suono, anche in Ripresa)", prefs.getBoolean("lowwarn", true)) {
-            prefs.edit().putBoolean("lowwarn", it).apply()
-        })
-
-        col.addView(toggleRow("Beep degli avvisi (spento = solo vibrazione e avviso sul riquadro; in REC i beep non suonano mai)", prefs.getBoolean("alertsound", true)) {
-            prefs.edit().putBoolean("alertsound", it).apply()
+        col.addView(toggleRow("Avviso batteria e memoria in esaurimento (vibrazione e suono)", prefs.getBoolean("lowalert", true)) {
+            prefs.edit().putBoolean("lowalert", it).apply()
         })
 
         val mrow = FlowRow(this, dp(8))
@@ -3096,24 +3120,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stepperRow(label: String, i: Int, cam: SonyCam, p: Prop): View {
-        // finestra stretta (telefono): etichetta sopra, comandi sotto a tutta larghezza; larga: tutto sulla stessa riga
-        val narrow = dlgWidth(0.55f) / resources.displayMetrics.density < 520f
-        val outer = LinearLayout(this)
-        outer.orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-        outer.setPadding(0, dp(6), 0, dp(6))
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(0, dp(6), 0, dp(6))
         val l = TextView(this)
         l.text = label
         l.setTextColor(Pal.TEXT)
         l.textSize = 15f
-        if (narrow) {
-            outer.addView(l, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        } else {
-            outer.gravity = Gravity.CENTER_VERTICAL
-            outer.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
+        row.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         val can = p.settable && p.options.isNotEmpty()
         val idx = p.options.indexOf(p.current)
@@ -3134,20 +3149,10 @@ class MainActivity : AppCompatActivity() {
         v.textSize = 16f
         v.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         v.gravity = Gravity.CENTER
-        if (narrow) {
-            row.addView(minus, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f))
-            row.addView(plus, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            rlp.topMargin = dp(4)
-            outer.addView(row, rlp)
-        } else {
-            row.addView(minus)
-            row.addView(v, LinearLayout.LayoutParams(dp(130), ViewGroup.LayoutParams.WRAP_CONTENT))
-            row.addView(plus)
-            outer.addView(row)
-        }
-        return outer
+        row.addView(minus)
+        row.addView(v, LinearLayout.LayoutParams(dp(130), ViewGroup.LayoutParams.WRAP_CONTENT))
+        row.addView(plus)
+        return row
     }
 
     private fun copyDiagnostics() {
@@ -3305,7 +3310,6 @@ class MainActivity : AppCompatActivity() {
             lastMem[i]?.let { e.putString("lmem$i", it) }
             e.apply()
         }
-        checkLow(i, bl, SonyProps.mediaSeconds(m).filterNotNull().maxOrNull())
         if (SonyProps.overheat(m) && System.currentTimeMillis() - lastHeat[i] > 60000L) {
             lastHeat[i] = System.currentTimeMillis()
             alertCam(i, "Camera calda: rischio di spegnimento")

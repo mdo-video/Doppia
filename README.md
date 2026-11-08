@@ -1,4 +1,4 @@
-# Doppia 1.15 (note vocali, avvisi batteria e memoria, misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.11 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,23 +51,15 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
-## Novita' 1.15
-- **Impostazioni sul telefono in verticale**: i parametri delle camere (modo esposizione, compensazione EV, misurazione, bilanciamento bianco, temperatura colore) non si schiacciano più: il nome sta sopra e i comandi ‹ valore › sotto, a tutta larghezza. Su tablet resta tutto su una riga.
-
-## Novita' 1.13
-- **Tasti rapidi sotto il live view**: due nuovi tondi, **zebra** (strisce) e **peaking** (montagna), accanto a screenshot e sovrapposizione. Un tocco li accende e li spegne (gialli = accesi) e restano in sincronia con Impostazioni.
-- **Nascondi i tasti**: Impostazioni > Monitor > **Tasti rapidi sotto il live view** toglie tutti e quattro i tondi insieme (zebra, peaking, screenshot, sovrapposizione). Zebra e peaking già accesi restano accesi.
-
-## Novita' 1.12
-- **Nota vocale**: **tieni premuto ⚑ Nota** (in Setup e in Ripresa), parla e rilascia: il testo detto diventa la nota del segno, in italiano. Un tocco breve apre ancora la finestra con frasi rapide e testo. Il segno prende il momento in cui hai iniziato a tenere premuto. La prima volta Android chiede il permesso del microfono; poi tieni premuto di nuovo. Il testo finisce nell'elenco, nella scheda sessione e nell'esportazione per Premiere come le altre note.
-- **Avvisi batteria e memoria**: una camera sotto il 15% di batteria o sotto 10 minuti di spazio fa comparire l'avviso sul riquadro con vibrazione e suono, anche in Ripresa. Avviso una volta sola, si riarma sopra il 20% e sopra 15 minuti. Si spegne in Impostazioni > Take e segni.
-- Aggiunto il permesso Microfono (solo per le note vocali).
-- **Beep disattivabili**: Impostazioni > Take e segni > **Beep degli avvisi**. Spento, gli avvisi restano con vibrazione e scritta sul riquadro.
-- **In REC niente suoni**: se una camera registra, gli avvisi di batteria e memoria non suonano e non vibrano (rientrerebbero nel microfono); la percentuale della batteria o il tempo di memoria **lampeggia in rosso** sul riquadro. Sotto il 15% o 10 minuti il valore è rosso fisso anche fuori REC.
+## Novita' 1.11
+- **Kelvin dentro Doppia**: non e' piu' una schermata a parte. Finestra che ruota con l'app, con sorgente a scelta tra le due camere Sony (dal live view) e la camera del tablet.
+- **Note vocali**: tieni premuto **⚑ Nota** (anche il pulsante grande in Ripresa) oppure usa **🎤 Detta** nella finestra Nota. Il segno ha il momento della pressione; il testo arriva dopo la dettatura. Serve il permesso Microfono. Se non viene riconosciuto niente, il segno viene aggiunto lo stesso, senza testo. Attenzione: se le camere registrano, la voce si sente nell'audio.
+- **La nota scritta** ora segna il momento in cui premi Nota, non quello in cui finisci di scrivere.
+- **Avvisi batteria e memoria**: vibrazione e suono quando una camera scende sotto il 20% e il 10% di batteria o sotto 15 e 10 minuti di memoria (una volta per livello). Si spegne nelle Impostazioni.
 
 ## Novita' 1.10
-- **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre la camera posteriore del tablet: inquadra una superficie bianca o grigia neutra, illuminata dalla luce da misurare. Compare il valore in Kelvin con la scala caldo/freddo.
-- **Imposta camere**: porta il valore in Doppia, che mette il bilanciamento del bianco in temperatura colore e i Kelvin misurati su ogni camera live (al valore piu' vicino tra quelli ammessi dalla camera). Il risultato e' scritto nel Log.
+- **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre una finestra dentro Doppia (ruota con l'app). In alto scegli la sorgente: una delle **camere Sony** (misura dal live view: inquadra una carta grigia o bianca nel riquadro al centro; il WB della camera deve essere in Kelvin o su un preset) oppure la **camera del tablet** (inquadra una superficie bianca o grigia illuminata dalla luce da misurare). Compare il valore in Kelvin con la scala caldo/freddo.
+- **Imposta camere** / **Solo (camera)**: mette il bilanciamento del bianco in temperatura colore e i Kelvin misurati su tutte le camere live, o solo su quella misurata (al valore piu' vicino tra quelli ammessi dalla camera). Con la sorgente camera puoi misurare di nuovo dopo l'impostazione: la carta deve risultare neutra. Il risultato e' scritto nel Log.
 - Se il tablet non espone le matrici colore, la misura e' una stima approssimata (valore con ≈ davanti).
 - Aggiunto il permesso Camera (solo per il misuratore).
 - **Impostazioni sul telefono in orizzontale**: i tasti Esporta per Premiere, Copia elenco e Azzera sessione vanno a capo se non c'e' spazio, invece di schiacciarsi (e lasciare un vuoto nella finestra).
