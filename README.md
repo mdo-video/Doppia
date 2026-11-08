@@ -1,4 +1,4 @@
-# Doppia 1.14 (note vocali, avvisi batteria e memoria, misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.15 (note vocali, avvisi batteria e memoria, misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,7 +51,7 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
-## Novita' 1.14
+## Novita' 1.15
 - **Impostazioni sul telefono in verticale**: i parametri delle camere (modo esposizione, compensazione EV, misurazione, bilanciamento bianco, temperatura colore) non si schiacciano più: il nome sta sopra e i comandi ‹ valore › sotto, a tutta larghezza. Su tablet resta tutto su una riga.
 
 ## Novita' 1.13

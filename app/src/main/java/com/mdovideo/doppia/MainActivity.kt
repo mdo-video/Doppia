@@ -3064,24 +3064,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chooserRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
-        // finestra stretta (telefono): etichetta sopra, comandi sotto a tutta larghezza; larga: tutto sulla stessa riga
-        val narrow = dlgWidth(0.55f) / resources.displayMetrics.density < 520f
-        val outer = LinearLayout(this)
-        outer.orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-        outer.setPadding(0, dp(6), 0, dp(6))
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(0, dp(6), 0, dp(6))
         val l = TextView(this)
         l.text = label
         l.setTextColor(Pal.TEXT)
         l.textSize = 15f
-        if (narrow) {
-            outer.addView(l, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        } else {
-            outer.gravity = Gravity.CENTER_VERTICAL
-            outer.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
+        row.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val pills = ArrayList<TextView>()
         fun paint(sel: Int) {
             for ((k, t) in pills.withIndex()) {
@@ -3105,15 +3096,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stepperRow(label: String, i: Int, cam: SonyCam, p: Prop): View {
+        // finestra stretta (telefono): etichetta sopra, comandi sotto a tutta larghezza; larga: tutto sulla stessa riga
+        val narrow = dlgWidth(0.55f) / resources.displayMetrics.density < 520f
+        val outer = LinearLayout(this)
+        outer.orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        outer.setPadding(0, dp(6), 0, dp(6))
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(0, dp(6), 0, dp(6))
         val l = TextView(this)
         l.text = label
         l.setTextColor(Pal.TEXT)
         l.textSize = 15f
-        row.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (narrow) {
+            outer.addView(l, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        } else {
+            outer.gravity = Gravity.CENTER_VERTICAL
+            outer.addView(l, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
 
         val can = p.settable && p.options.isNotEmpty()
         val idx = p.options.indexOf(p.current)
