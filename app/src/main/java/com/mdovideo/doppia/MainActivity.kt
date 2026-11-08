@@ -1497,6 +1497,9 @@ class MainActivity : AppCompatActivity() {
         modeBtn = pillButton("▶ Ripresa")
         modeBtn.setOnClickListener { setShootMode(!shootMode) }
         bar.addView(sceneBtn, spaced(10))
+        val kelvinBtn = pillButton("🌡 Kelvin")
+        kelvinBtn.setOnClickListener { kelvinLauncher.launch(android.content.Intent(this, KelvinActivity::class.java)) }
+        bar.addView(kelvinBtn, spaced(10))
         bar.addView(syncBtn, spaced(10))
         bar.addView(goodBtn, spaced(6))
         bar.addView(badBtn, spaced(6))
@@ -1505,7 +1508,7 @@ class MainActivity : AppCompatActivity() {
         bar.addView(modeBtn, spaced(6))
         bar.addView(setBtn, spaced(6))
         // in Ripresa spariscono: aggiornamento, Sync, segni piccoli (ci sono quelli grandi in basso), Impostazioni
-        setupOnly.addAll(listOf<View>(updBtn, syncBtn, goodBtn, badBtn, noteBtn, setBtn))
+        setupOnly.addAll(listOf<View>(updBtn, kelvinBtn, syncBtn, goodBtn, badBtn, noteBtn, setBtn))
         // In verticale i tasti possono non starci tutti: la barra scorre di lato
         val barScroll = HorizontalScrollView(this)
         barScroll.isHorizontalScrollBarEnabled = false
@@ -2150,6 +2153,54 @@ class MainActivity : AppCompatActivity() {
         SonyProps.APERTURE -> "diaframma"
         SonyProps.ISO -> "ISO"
         else -> paramNames[code]?.lowercase(Locale.ROOT) ?: "parametro"
+    }
+
+    private val kelvinLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val k = r.data?.getIntExtra("k", 0) ?: 0
+        if (r.resultCode == android.app.Activity.RESULT_OK && k > 0) applyKelvin(k)
+    }
+
+    /** Imposta il bilanciamento del bianco in temperatura colore e i Kelvin misurati su ogni camera live. */
+    private fun applyKelvin(k: Int) {
+        val live = (0..1).filter { cams[it] != null && liveNow[it] }
+        if (live.isEmpty()) {
+            val msg = "Nessuna camera live: collega almeno una camera per impostare $k K"
+            addLog(msg)
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            return
+        }
+        for (i in live) {
+            val cam = cams[i] ?: continue
+            val wb = cam.props[SonyProps.WB]
+            val needWb = wb == null || wb.current != SonyProps.WB_KELVIN
+            if (needWb) {
+                if (wb == null || !wb.settable || !wb.options.contains(SonyProps.WB_KELVIN)) {
+                    val msg = "${camName(i)}: non accetta il bilanciamento in temperatura colore"
+                    addLog(msg)
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    continue
+                }
+                cam.setProp(wb, SonyProps.WB_KELVIN)
+            }
+            // dopo il cambio di WB la camera abilita la proprieta' Kelvin: aspetta che compaia nella tabella
+            rootView.postDelayed({ setKelvinOn(i, k) }, if (needWb) 900L else 0L)
+        }
+    }
+
+    private fun setKelvinOn(i: Int, k: Int) {
+        val cam = cams[i] ?: return
+        val kp = cam.props[SonyProps.KELVIN]
+        if (kp == null || !kp.settable) {
+            val msg = "${camName(i)}: la camera non lascia impostare i Kelvin ora"
+            addLog(msg)
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            return
+        }
+        val v = if (kp.options.isEmpty()) k.toLong() else kp.options.minByOrNull { Math.abs(it - k.toLong()) } ?: k.toLong()
+        cam.setProp(kp, v)
+        val msg = "${camName(i)}: bilanciamento del bianco ${v} K"
+        addLog(msg)
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     /** Cambia un parametro sulla camera i e, con Sync accesa, sull'altra camera se live e se accetta quel valore. */
