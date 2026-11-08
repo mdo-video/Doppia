@@ -3536,15 +3536,52 @@ class MainActivity : AppCompatActivity() {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.gravity = Gravity.CENTER_HORIZONTAL
-        box.setPadding(dp(16), dp(8), dp(16), dp(8))
-        val dots = TextView(this)
-        dots.textSize = 30f
-        dots.gravity = Gravity.CENTER
-        dots.setTextColor(Pal.TEXT)
-        box.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = dp(12) })
+        box.setPadding(dp(24), dp(24), dp(24), dp(4))
+
+        val title = TextView(this)
+        title.text = if (saved == null) "Scegli un PIN" else "Inserisci il PIN"
+        title.textSize = 22f
+        title.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        title.gravity = Gravity.CENTER
+        title.setTextColor(Pal.TEXT)
+        box.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val sub = TextView(this)
+        sub.text = if (saved == null) "4 cifre, servirà per attivare la modalità test" else "Modalità test"
+        sub.textSize = 13f
+        sub.gravity = Gravity.CENTER
+        sub.setTextColor(Pal.MUTED)
+        box.addView(sub, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = dp(4); it.bottomMargin = dp(22) })
+
+        val dotsRow = LinearLayout(this)
+        dotsRow.orientation = LinearLayout.HORIZONTAL
+        dotsRow.gravity = Gravity.CENTER
+        val dotViews = (0 until 4).map {
+            val v = View(this)
+            dotsRow.addView(v, LinearLayout.LayoutParams(dp(16), dp(16)).also { lp -> lp.setMargins(dp(10), 0, dp(10), 0) })
+            v
+        }
+        box.addView(dotsRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = dp(24) })
+
         var entered = ""
+        var busy = false
         val ref = arrayOfNulls<AlertDialog>(1)
-        fun paint() { dots.text = (0 until 4).joinToString("  ") { if (it < entered.length) "●" else "○" } }
+        fun dotBg(filled: Boolean, color: Int): GradientDrawable {
+            val g = GradientDrawable()
+            g.shape = GradientDrawable.OVAL
+            if (filled) g.setColor(color) else { g.setColor(Color.TRANSPARENT); g.setStroke(dp(2), Pal.MUTED) }
+            return g
+        }
+        fun paint(color: Int = Pal.MID) {
+            dotViews.forEachIndexed { i, v ->
+                val filled = i < entered.length
+                v.background = dotBg(filled, color)
+                if (filled && i == entered.length - 1 && color == Pal.MID) {
+                    v.scaleX = 0.6f; v.scaleY = 0.6f
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                }
+            }
+        }
         paint()
         fun submit() {
             val v = entered
@@ -3556,53 +3593,64 @@ class MainActivity : AppCompatActivity() {
                 ref[0]?.dismiss()
                 done(true)
             } else {
-                Toast.makeText(this, "PIN sbagliato", Toast.LENGTH_SHORT).show()
-                entered = ""
-                paint()
+                busy = true
+                paint(Pal.HOT)
+                dotsRow.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                val s = dp(10).toFloat()
+                android.animation.ObjectAnimator.ofFloat(dotsRow, "translationX", 0f, -s, s, -s * 0.8f, s * 0.8f, -s * 0.4f, 0f).setDuration(380).start()
+                dotsRow.postDelayed({ entered = ""; busy = false; paint() }, 420)
             }
         }
-        fun key(label: String, onTap: () -> Unit): View {
+        fun key(label: String, ghost: Boolean, onTap: () -> Unit): View {
             val t = TextView(this)
             t.text = label
-            t.textSize = 24f
-            t.typeface = Typeface.DEFAULT_BOLD
+            t.textSize = if (ghost) 24f else 28f
+            t.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             t.gravity = Gravity.CENTER
-            t.setTextColor(Pal.TEXT)
-            t.background = roundBg(Pal.LINE, 34, this)
-            t.setOnClickListener { onTap() }
-            Springs.pressable(t)
+            t.setTextColor(if (ghost) Pal.MUTED else Pal.TEXT)
+            val face = GradientDrawable()
+            face.shape = GradientDrawable.OVAL
+            if (ghost) face.setColor(Color.TRANSPARENT) else { face.setColor(Pal.CARD); face.setStroke(dp(1), Pal.LINE) }
+            val mask = GradientDrawable()
+            mask.shape = GradientDrawable.OVAL
+            mask.setColor(Color.WHITE)
+            t.background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33FFC107), face, mask)
+            t.setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onTap() }
+            Springs.pressable(t, 0.92f)
             return t
         }
         val labels = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫")
         for (r in 0 until 4) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_HORIZONTAL
             for (c in 0 until 3) {
                 val lab = labels[r * 3 + c]
                 val v: View = when (lab) {
                     "" -> View(this)
-                    "⌫" -> key(lab) { if (entered.isNotEmpty()) { entered = entered.dropLast(1); paint() } }
-                    else -> key(lab) {
-                        if (entered.length < 4) {
+                    "⌫" -> key(lab, true) { if (!busy && entered.isNotEmpty()) { entered = entered.dropLast(1); paint() } }
+                    else -> key(lab, false) {
+                        if (!busy && entered.length < 4) {
                             entered += lab
                             paint()
                             if (entered.length == 4) submit()
                         }
                     }
                 }
-                val lp = LinearLayout.LayoutParams(dp(68), dp(68))
-                lp.setMargins(dp(6), dp(6), dp(6), dp(6))
+                val lp = LinearLayout.LayoutParams(dp(72), dp(72))
+                lp.setMargins(dp(8), dp(6), dp(8), dp(6))
                 row.addView(v, lp)
             }
-            box.addView(row)
+            box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         ref[0] = MaterialAlertDialogBuilder(this)
-            .setTitle(if (saved == null) "Scegli un PIN di 4 cifre" else "Inserisci il PIN")
             .setView(box)
             .setNegativeButton("Annulla") { _, _ -> done(false) }
             .setOnCancelListener { done(false) }
             .create()
         ref[0]?.show()
+        // finestra compatta e centrata: su tablet non si allarga piu' a tutto lo schermo
+        ref[0]?.window?.setLayout(dp(340), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     private fun toggle(i: Int) {
