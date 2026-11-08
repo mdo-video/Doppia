@@ -2586,8 +2586,7 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putBoolean("alignwarn", it).apply()
         })
 
-        val mrow = LinearLayout(this)
-        mrow.orientation = LinearLayout.HORIZONTAL
+        val mrow = FlowRow(this, dp(8))
         val mexp = pillButton("Esporta per Premiere")
         mexp.backgroundTintList = ColorStateList.valueOf(Pal.MID)
         mexp.setTextColor(Pal.BG)
@@ -2614,8 +2613,8 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
         mrow.addView(mexp)
-        mrow.addView(mcopy, spaced(6))
-        mrow.addView(mclear, spaced(6))
+        mrow.addView(mcopy)
+        mrow.addView(mclear)
         val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mlp.topMargin = dp(8)
         col.addView(mrow, mlp)

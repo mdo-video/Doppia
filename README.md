@@ -1,4 +1,4 @@
-# Doppia 1.9 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.10 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,11 +51,12 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
-## Novita' 1.9
+## Novita' 1.10
 - **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre la camera posteriore del tablet: inquadra una superficie bianca o grigia neutra, illuminata dalla luce da misurare. Compare il valore in Kelvin con la scala caldo/freddo.
 - **Imposta camere**: porta il valore in Doppia, che mette il bilanciamento del bianco in temperatura colore e i Kelvin misurati su ogni camera live (al valore piu' vicino tra quelli ammessi dalla camera). Il risultato e' scritto nel Log.
 - Se il tablet non espone le matrici colore, la misura e' una stima approssimata (valore con ≈ davanti).
 - Aggiunto il permesso Camera (solo per il misuratore).
+- **Impostazioni sul telefono in orizzontale**: i tasti Esporta per Premiere, Copia elenco e Azzera sessione vanno a capo se non c'e' spazio, invece di schiacciarsi (e lasciare un vuoto nella finestra).
 
 ## Novita' 1.8
 - **Verticale e orizzontale**: l'app ruota con il tablet. In orizzontale le camere sono affiancate, in verticale una sopra l'altra (la barra in alto scorre di lato se i tasti non stanno). Il tocco su un riquadro lo ingrandisce a tutto schermo in entrambe le posizioni.
