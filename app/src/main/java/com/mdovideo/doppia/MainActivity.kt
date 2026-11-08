@@ -1019,6 +1019,29 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
+    private var battLow = false
+    private var battWarn = false
+    private var battPhase = true
+    private val battBlink = object : Runnable {
+        override fun run() {
+            battPhase = !battPhase
+            paintBatt()
+            if (battLow && recording) postDelayed(this, 500)
+        }
+    }
+
+    /** Batteria o memoria in esaurimento: rosso fisso; durante il REC lampeggia in rosso (niente suoni, che rientrerebbero nel microfono). */
+    private fun paintBatt() {
+        removeCallbacks(battBlink)
+        if (battLow && recording) {
+            batt.setTextColor(if (battPhase) 0xFFFF1744.toInt() else 0x66FF1744)
+            postDelayed(battBlink, 500)
+        } else {
+            battPhase = true
+            batt.setTextColor(if (battLow) 0xFFEF5350.toInt() else if (battWarn) Pal.MID else Pal.TEXT)
+        }
+    }
+
     /** Avviso temporaneo in alto (REC fermato dalla camera, camera calda, connessione persa...). */
     fun showAlert(text: String) {
         alertV.text = text
@@ -1230,14 +1253,17 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (valid.isEmpty()) parts.add("💾 —")
         else parts.add("💾 " + mem.mapIndexedNotNull { i, s -> if (s == null) null else (if (mem.size > 1 && valid.size > 1) "${i + 1}: " else "") + SonyProps.fmtRemain(s) }.joinToString("  "))
         batt.text = parts.joinToString("   ")
-        val lowBat = bl != null && bl <= 10
-        val lowMem = valid.isNotEmpty() && valid.minOrNull()!! < 600
-        val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.minOrNull()!! < 1200)
-        batt.setTextColor(if (lowBat || lowMem) 0xFFEF5350.toInt() else if (warn) Pal.MID else Pal.TEXT)
+        val lowBat = bl != null && bl <= 15
+        val lowMem = valid.isNotEmpty() && valid.maxOrNull()!! <= 600
+        val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.maxOrNull()!! < 1200)
+        battLow = lowBat || lowMem
+        battWarn = warn
+        paintBatt()
         batt.visibility = View.VISIBLE
         val r = (m[SonyProps.REC_STATE]?.current ?: 0L) != 0L
         if (r != recording) {
             recording = r
+            paintBatt()
             recBtn.pending = false
             recBtn.recording = r
             foreground = if (r) borderRed else null
@@ -1614,7 +1640,7 @@ class MainActivity : AppCompatActivity() {
         paintScene()
         setShootMode(prefs.getBoolean("shoot", false))
         rootView.postDelayed(alignRun, 500)
-        addLog("Doppia 1.11: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
+        addLog("Doppia 1.12: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -2068,8 +2094,8 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Avvisi: vibrazione, suono, REC non allineato ----------
 
-    private fun buzz() {
-        try {
+    private fun buzz(sound: Boolean = true, vibrate: Boolean = true) {
+        if (vibrate) try {
             val v = if (Build.VERSION.SDK_INT >= 31) {
                 (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
             } else {
@@ -2078,7 +2104,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (v.hasVibrator()) v.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250, 120, 450), -1))
         } catch (_: Throwable) {}
-        try {
+        if (sound && prefs.getBoolean("alertsound", true)) try {
             val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90)
             tg.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 700)
             rootView.postDelayed({ try { tg.release() } catch (_: Throwable) {} }, 1500)
@@ -2086,9 +2112,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Avviso sul riquadro della camera i, con vibrazione e suono. */
-    private fun alertCam(i: Int, text: String) {
+    private fun alertCam(i: Int, text: String, quietInRec: Boolean = false) {
         addLog("AVVISO ${camName(i)}: $text")
         tiles[i].showAlert("⚠ $text")
+        // avvisi di batteria e memoria: se una camera registra niente suono e niente vibrazione (rientrerebbero nel microfono), lampeggia la percentuale
+        if (quietInRec && tiles.any { it.recording }) return
         buzz()
     }
 
@@ -2371,11 +2399,11 @@ class MainActivity : AppCompatActivity() {
     private fun checkLow(i: Int, bl: Int?, memSec: Long?) {
         if (!prefs.getBoolean("lowwarn", true)) return
         if (bl != null) {
-            if (bl <= 15 && !lowBatSent[i]) { lowBatSent[i] = true; alertCam(i, "Batteria bassa: $bl%") }
+            if (bl <= 15 && !lowBatSent[i]) { lowBatSent[i] = true; alertCam(i, "Batteria bassa: $bl%", true) }
             else if (bl > 20) lowBatSent[i] = false
         }
         if (memSec != null) {
-            if (memSec <= 600L && !lowMemSent[i]) { lowMemSent[i] = true; alertCam(i, "Memoria in esaurimento: ${SonyProps.fmtRemain(memSec)}") }
+            if (memSec <= 600L && !lowMemSent[i]) { lowMemSent[i] = true; alertCam(i, "Memoria in esaurimento: ${SonyProps.fmtRemain(memSec)}", true) }
             else if (memSec > 900L) lowMemSent[i] = false
         }
     }
@@ -2692,6 +2720,10 @@ class MainActivity : AppCompatActivity() {
 
         col.addView(toggleRow("Avviso batteria sotto il 15% e memoria sotto i 10 minuti (vibrazione e suono, anche in Ripresa)", prefs.getBoolean("lowwarn", true)) {
             prefs.edit().putBoolean("lowwarn", it).apply()
+        })
+
+        col.addView(toggleRow("Beep degli avvisi (spento = solo vibrazione e avviso sul riquadro; in REC i beep non suonano mai)", prefs.getBoolean("alertsound", true)) {
+            prefs.edit().putBoolean("alertsound", it).apply()
         })
 
         val mrow = FlowRow(this, dp(8))

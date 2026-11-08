@@ -1,4 +1,4 @@
-# Doppia 1.11 (note vocali, avvisi batteria e memoria, misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.12 (note vocali, avvisi batteria e memoria, misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,10 +51,12 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
-## Novita' 1.11
+## Novita' 1.12
 - **Nota vocale**: **tieni premuto ⚑ Nota** (in Setup e in Ripresa), parla e rilascia: il testo detto diventa la nota del segno, in italiano. Un tocco breve apre ancora la finestra con frasi rapide e testo. Il segno prende il momento in cui hai iniziato a tenere premuto. La prima volta Android chiede il permesso del microfono; poi tieni premuto di nuovo. Il testo finisce nell'elenco, nella scheda sessione e nell'esportazione per Premiere come le altre note.
 - **Avvisi batteria e memoria**: una camera sotto il 15% di batteria o sotto 10 minuti di spazio fa comparire l'avviso sul riquadro con vibrazione e suono, anche in Ripresa. Avviso una volta sola, si riarma sopra il 20% e sopra 15 minuti. Si spegne in Impostazioni > Take e segni.
 - Aggiunto il permesso Microfono (solo per le note vocali).
+- **Beep disattivabili**: Impostazioni > Take e segni > **Beep degli avvisi**. Spento, gli avvisi restano con vibrazione e scritta sul riquadro.
+- **In REC niente suoni**: se una camera registra, gli avvisi di batteria e memoria non suonano e non vibrano (rientrerebbero nel microfono); la percentuale della batteria o il tempo di memoria **lampeggia in rosso** sul riquadro. Sotto il 15% o 10 minuti il valore è rosso fisso anche fuori REC.
 
 ## Novita' 1.10
 - **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre la camera posteriore del tablet: inquadra una superficie bianca o grigia neutra, illuminata dalla luce da misurare. Compare il valore in Kelvin con la scala caldo/freddo.
