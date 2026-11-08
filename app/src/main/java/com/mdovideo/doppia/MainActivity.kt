@@ -440,12 +440,12 @@ class GuidesView(ctx: Context) : View(ctx) {
 
 /** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
 class IconButton(ctx: Context) : View(ctx) {
-    enum class Kind { CAMERA, SHARE, LAYERS }
+    enum class Kind { CAMERA, SHARE, LAYERS, GUIDES, ZEBRA, PEAK }
 
     var kind = Kind.CAMERA
         set(v) { field = v; invalidate() }
     var active = false
-        set(v) { field = v; invalidate() }
+        set(v) { if (field != v) { field = v; invalidate() } }
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -485,6 +485,28 @@ class IconButton(ctx: Context) : View(ctx) {
             Kind.LAYERS -> {
                 c.drawRoundRect(w * 0.28f, h * 0.26f, w * 0.62f, h * 0.58f, w * 0.05f, w * 0.05f, stroke)
                 c.drawRoundRect(w * 0.38f, h * 0.42f, w * 0.72f, h * 0.74f, w * 0.05f, w * 0.05f, stroke)
+            }
+            Kind.GUIDES -> {
+                c.drawRoundRect(w * 0.24f, h * 0.30f, w * 0.76f, h * 0.70f, w * 0.05f, w * 0.05f, stroke)
+                c.drawRect(w * 0.38f, h * 0.40f, w * 0.62f, h * 0.60f, stroke)
+            }
+            Kind.ZEBRA -> {
+                val l = w * 0.28f
+                val r = w * 0.72f
+                val t = h * 0.28f
+                val b = h * 0.72f
+                val sz = r - l
+                c.drawRoundRect(l, t, r, b, w * 0.05f, w * 0.05f, stroke)
+                c.drawLine(l, t + sz * 0.6f, l + sz * 0.6f, t, stroke)
+                c.drawLine(l, b, r, t, stroke)
+                c.drawLine(l + sz * 0.4f, b, r, b - sz * 0.6f, stroke)
+            }
+            Kind.PEAK -> {
+                c.drawLine(w * 0.26f, h * 0.70f, w * 0.45f, h * 0.34f, stroke)
+                c.drawLine(w * 0.45f, h * 0.34f, w * 0.60f, h * 0.58f, stroke)
+                c.drawLine(w * 0.60f, h * 0.58f, w * 0.67f, h * 0.48f, stroke)
+                c.drawLine(w * 0.67f, h * 0.48f, w * 0.76f, h * 0.70f, stroke)
+                c.drawLine(w * 0.26f, h * 0.70f, w * 0.76f, h * 0.70f, stroke)
             }
         }
     }
@@ -551,6 +573,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val side = LinearLayout(ctx)
     private val shotBtn = IconButton(ctx)
     private val ovlBtn = IconButton(ctx)
+    private val guideBtn = IconButton(ctx)
+    private val zebraBtn = IconButton(ctx)
+    private val peakBtn = IconButton(ctx)
     private val ovlPanel = LinearLayout(ctx)
     private val ovlLabel = TextView(ctx)
     private val ovlSeek = SeekBar(ctx)
@@ -588,6 +613,44 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     /** Chiamata quando la camera inizia (true) o finisce (false) di registrare. */
     var onRecChange: ((Boolean) -> Unit)? = null
     var onLevels: ((Int?, Long?) -> Unit)? = null
+    var onToggleGuides: (() -> Unit)? = null
+    var onToggleZebra: (() -> Unit)? = null
+    var onTogglePeak: (() -> Unit)? = null
+
+    // Batteria scarica: l'indicatore lampeggia (solo visivo)
+    private var lowBattOn = false
+    private var blinkPh = false
+    private val battBlink = object : Runnable {
+        override fun run() {
+            if (!lowBattOn) return
+            blinkPh = !blinkPh
+            batt.alpha = if (lost) 0.5f else if (blinkPh) 0.15f else 1f
+            postDelayed(this, 500L)
+        }
+    }
+
+    fun setLowBattery(on: Boolean) {
+        if (on == lowBattOn) return
+        lowBattOn = on
+        removeCallbacks(battBlink)
+        if (on) post(battBlink) else batt.alpha = if (lost) 0.5f else 1f
+    }
+
+    /** Riallinea i pulsanti guide / zebra / peaking e cio' che mostrano con le impostazioni correnti. */
+    fun refreshTools() {
+        guideBtn.active = Monitor.guidesShow
+        zebraBtn.active = Monitor.zebra
+        peakBtn.active = Monitor.peaking
+        if (hasFrame) {
+            guideV.mask = Monitor.guidesOn
+            guideV.safe = Monitor.safeOn
+            guideV.visibility = if (Monitor.guidesOn != 0 || Monitor.safeOn) View.VISIBLE else View.GONE
+            updateGuideBar()
+            guideV.invalidate()
+            if (!Monitor.zebra) zebraImg.visibility = View.GONE
+            if (!Monitor.peaking) peakImg.visibility = View.GONE
+        }
+    }
     var onConnect: (() -> Unit)? = null
     var onPick: ((Prop, Long) -> Unit)? = null
 
@@ -889,6 +952,17 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         val ovlLp = LinearLayout.LayoutParams(dp(34), dp(34))
         ovlLp.leftMargin = dp(8)
         side.addView(ovlBtn, ovlLp)
+        guideBtn.kind = IconButton.Kind.GUIDES
+        guideBtn.setOnClickListener { onToggleGuides?.invoke() }
+        zebraBtn.kind = IconButton.Kind.ZEBRA
+        zebraBtn.setOnClickListener { onToggleZebra?.invoke() }
+        peakBtn.kind = IconButton.Kind.PEAK
+        peakBtn.setOnClickListener { onTogglePeak?.invoke() }
+        for (b in arrayOf(guideBtn, zebraBtn, peakBtn)) {
+            val lp = LinearLayout.LayoutParams(dp(34), dp(34))
+            lp.leftMargin = dp(8)
+            side.addView(b, lp)
+        }
         val sdLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         sdLp.gravity = Gravity.BOTTOM or Gravity.END
         sdLp.setMargins(dp(12), 0, dp(12), dp(78))
@@ -1095,11 +1169,14 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         gridV.visibility = if (Monitor.grid && !shoot) View.VISIBLE else View.GONE
         gridV.invalidate()
         guideV.aspect = b.width.toFloat() / b.height
-        guideV.mask = Monitor.guides
-        guideV.safe = Monitor.safe
-        guideV.visibility = if (Monitor.guides != 0 || Monitor.safe) View.VISIBLE else View.GONE
+        guideV.mask = Monitor.guidesOn
+        guideV.safe = Monitor.safeOn
+        guideV.visibility = if (Monitor.guidesOn != 0 || Monitor.safeOn) View.VISIBLE else View.GONE
         updateGuideBar()
         guideV.invalidate()
+        guideBtn.active = Monitor.guidesShow
+        zebraBtn.active = Monitor.zebra
+        peakBtn.active = Monitor.peaking
 
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
@@ -1177,7 +1254,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
     /** Aggiorna la barra guide: lucchetto, pulsanti di posizione e testo con la posizione della guida scelta. */
     private fun updateGuideBar() {
-        if (Monitor.guides == 0 || !hasFrame || shoot || lost) {
+        if (Monitor.guidesOn == 0 || !hasFrame || shoot || lost) {
             guideBar.visibility = View.GONE
             guideV.locked = true
             return
@@ -1228,7 +1305,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (valid.isEmpty()) parts.add("💾 —")
         else parts.add("💾 " + mem.mapIndexedNotNull { i, s -> if (s == null) null else (if (mem.size > 1 && valid.size > 1) "${i + 1}: " else "") + SonyProps.fmtRemain(s) }.joinToString("  "))
         batt.text = parts.joinToString("   ")
-        val lowBat = bl != null && bl <= 10
+        val lowBat = bl != null && bl <= 15
         val lowMem = valid.isNotEmpty() && valid.minOrNull()!! < 600
         val warn = (bl != null && bl <= 25) || (valid.isNotEmpty() && valid.minOrNull()!! < 1200)
         batt.setTextColor(if (lowBat || lowMem) 0xFFEF5350.toInt() else if (warn) Pal.MID else Pal.TEXT)
@@ -1540,6 +1617,16 @@ class MainActivity : AppCompatActivity() {
             t.onGiveUp = { giveUp(i) }
             t.onRecChange = { r -> onRecChange(i, r) }
             t.onLevels = { bl, mem -> checkLevels(i, bl, mem) }
+            t.onToggleGuides = {
+                Monitor.guidesShow = !Monitor.guidesShow
+                Monitor.save(prefs)
+                refreshToolButtons()
+                if (Monitor.guidesShow && Monitor.guides == 0 && !Monitor.safe) {
+                    Toast.makeText(this, "Nessuna guida scelta: accendile in Impostazioni", Toast.LENGTH_SHORT).show()
+                }
+            }
+            t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; Monitor.save(prefs); refreshToolButtons() }
+            t.onTogglePeak = { Monitor.peaking = !Monitor.peaking; Monitor.save(prefs); refreshToolButtons() }
             t.onPick = { p, v -> applyProp(i, p, v) }
             Springs.pressable(t, 0.985f)
             t.setOnClickListener {
@@ -2087,15 +2174,21 @@ class MainActivity : AppCompatActivity() {
 
     private val lowLvl = IntArray(2)
 
-    /** Batteria o memoria in esaurimento: avviso con vibrazione e suono una volta per livello (batteria 20% e 10%, memoria 15 e 10 minuti). */
+    private fun refreshToolButtons() {
+        for (t in tiles) t.refreshTools()
+    }
+
+    /**
+     * Batteria sotto il 15%: l'indicatore lampeggia. Batteria o memoria in esaurimento (memoria sotto 15 e 10 minuti):
+     * avviso sul riquadro una volta per livello; vibrazione e suono solo se nessuna camera sta registrando.
+     */
     private fun checkLevels(i: Int, bl: Int?, mem: Long?) {
-        if (!prefs.getBoolean("lowalert", true)) return
+        val on = prefs.getBoolean("lowalert", true)
+        tiles[i].setLowBattery(on && bl != null && bl <= 15)
+        if (!on) return
         var lvl = 0
         var why = ""
-        if (bl != null) {
-            if (bl <= 10) { lvl = 2; why = "Batteria quasi scarica: $bl%" }
-            else if (bl <= 20) { lvl = 1; why = "Batteria bassa: $bl%" }
-        }
+        if (bl != null && bl <= 15) { lvl = 1; why = "Batteria bassa: $bl%" }
         if (mem != null) {
             val ml = if (mem < 600L) 2 else if (mem < 900L) 1 else 0
             if (ml > lvl) {
@@ -2105,17 +2198,18 @@ class MainActivity : AppCompatActivity() {
         }
         if (lvl > lowLvl[i]) {
             lowLvl[i] = lvl
-            alertCam(i, why)
+            val rec = tiles[0].recording || tiles[1].recording
+            alertCam(i, why, !rec)
         } else if (lvl == 0) {
             lowLvl[i] = 0
         }
     }
 
     /** Avviso sul riquadro della camera i, con vibrazione e suono. */
-    private fun alertCam(i: Int, text: String) {
+    private fun alertCam(i: Int, text: String, sound: Boolean = true) {
         addLog("AVVISO ${camName(i)}: $text")
         tiles[i].showAlert("⚠ $text")
-        buzz()
+        if (sound) buzz()
     }
 
     /** Ogni mezzo secondo: se una camera registra e l'altra no (tutte e due live) per piu' di 2,5 s, il riquadro che non registra lampeggia. */
@@ -2301,8 +2395,8 @@ class MainActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         if (r) {
             val t = Session.startTake(i, now - lag, takeLabel(i))
-            if (Monitor.guides != 0) {
-                val g = Guides.snapshot(i, Monitor.guides, tiles[i].frameAspect())
+            if (Monitor.guidesOn != 0) {
+                val g = Guides.snapshot(i, Monitor.guidesOn, tiles[i].frameAspect())
                 t.gj = g.first
                 t.gt = g.second
             }
@@ -2800,7 +2894,7 @@ class MainActivity : AppCompatActivity() {
         col.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se l'altra registra)", prefs.getBoolean("alignwarn", true)) {
             prefs.edit().putBoolean("alignwarn", it).apply()
         })
-        col.addView(toggleRow("Avviso batteria e memoria in esaurimento (vibrazione e suono)", prefs.getBoolean("lowalert", true)) {
+        col.addView(toggleRow("Avviso batteria (sotto 15%, lampeggia) e memoria in esaurimento; vibrazione e suono solo fuori dal REC", prefs.getBoolean("lowalert", true)) {
             prefs.edit().putBoolean("lowalert", it).apply()
         })
 

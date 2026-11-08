@@ -72,6 +72,11 @@ object Monitor {
     @Volatile var guides = 0             // bit k acceso = guida Guides.names[k] visibile
     @Volatile var safe = false           // zona sicura 9:16
     @Volatile var guideLock = true       // guide bloccate (non si spostano)
+    @Volatile var guidesShow = true      // interruttore rapido: mostra/nasconde guide e zona sicura
+
+    /** Guide effettivamente visibili (rispettano l'interruttore rapido). */
+    val guidesOn: Int get() = if (guidesShow) guides else 0
+    val safeOn: Boolean get() = guidesShow && safe
 
     fun load(p: SharedPreferences) {
         zebra = p.getBoolean("mon_zebra", false)
@@ -84,6 +89,7 @@ object Monitor {
         guides = p.getInt("mon_guides", 0)
         safe = p.getBoolean("mon_safe", false)
         guideLock = p.getBoolean("mon_glock", true)
+        guidesShow = p.getBoolean("mon_gshow", true)
         Guides.load(p)
     }
 
@@ -93,7 +99,7 @@ object Monitor {
             .putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
             .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter)
             .putInt("mon_guides", guides).putBoolean("mon_safe", safe)
-            .putBoolean("mon_glock", guideLock)
+            .putBoolean("mon_glock", guideLock).putBoolean("mon_gshow", guidesShow)
             .also { Guides.save(it) }
             .apply()
     }
