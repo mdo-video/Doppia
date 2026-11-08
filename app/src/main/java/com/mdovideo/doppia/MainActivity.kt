@@ -443,7 +443,7 @@ class GuidesView(ctx: Context) : View(ctx) {
 
 /** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
 class IconButton(ctx: Context) : View(ctx) {
-    enum class Kind { CAMERA, SHARE, LAYERS }
+    enum class Kind { CAMERA, SHARE, LAYERS, ZEBRA, PEAK }
 
     var kind = Kind.CAMERA
         set(v) { field = v; invalidate() }
@@ -488,6 +488,21 @@ class IconButton(ctx: Context) : View(ctx) {
             Kind.LAYERS -> {
                 c.drawRoundRect(w * 0.28f, h * 0.26f, w * 0.62f, h * 0.58f, w * 0.05f, w * 0.05f, stroke)
                 c.drawRoundRect(w * 0.38f, h * 0.42f, w * 0.72f, h * 0.74f, w * 0.05f, w * 0.05f, stroke)
+            }
+            Kind.ZEBRA -> {
+                // strisce oblique dentro un quadrato
+                c.drawRoundRect(w * 0.27f, h * 0.27f, w * 0.73f, h * 0.73f, w * 0.05f, w * 0.05f, stroke)
+                c.drawLine(w * 0.27f, h * 0.55f, w * 0.55f, h * 0.27f, stroke)
+                c.drawLine(w * 0.27f, h * 0.73f, w * 0.73f, h * 0.27f, stroke)
+                c.drawLine(w * 0.45f, h * 0.73f, w * 0.73f, h * 0.45f, stroke)
+            }
+            Kind.PEAK -> {
+                // profilo di una montagna con un punto: il bordo a fuoco
+                c.drawLine(w * 0.24f, h * 0.70f, w * 0.42f, h * 0.36f, stroke)
+                c.drawLine(w * 0.42f, h * 0.36f, w * 0.54f, h * 0.56f, stroke)
+                c.drawLine(w * 0.54f, h * 0.56f, w * 0.64f, h * 0.44f, stroke)
+                c.drawLine(w * 0.64f, h * 0.44f, w * 0.76f, h * 0.70f, stroke)
+                c.drawCircle(w * 0.42f, h * 0.30f, w * 0.045f, fill)
             }
         }
     }
@@ -554,6 +569,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val side = LinearLayout(ctx)
     private val shotBtn = IconButton(ctx)
     private val ovlBtn = IconButton(ctx)
+    private val zebraBtn = IconButton(ctx)
+    private val peakBtn = IconButton(ctx)
+    private var quickOn = true
     private val ovlPanel = LinearLayout(ctx)
     private val ovlLabel = TextView(ctx)
     private val ovlSeek = SeekBar(ctx)
@@ -887,7 +905,27 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlBtn.setOnClickListener {
             ovlPanel.visibility = if (ovlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        side.addView(shotBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
+        zebraBtn.kind = IconButton.Kind.ZEBRA
+        zebraBtn.active = Monitor.zebra
+        zebraBtn.setOnClickListener {
+            Monitor.zebra = !Monitor.zebra
+            zebraBtn.active = Monitor.zebra
+            onGuideSave?.invoke()
+        }
+        peakBtn.kind = IconButton.Kind.PEAK
+        peakBtn.active = Monitor.peaking
+        peakBtn.setOnClickListener {
+            Monitor.peaking = !Monitor.peaking
+            peakBtn.active = Monitor.peaking
+            onGuideSave?.invoke()
+        }
+        side.addView(zebraBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
+        val pkBtnLp = LinearLayout.LayoutParams(dp(34), dp(34))
+        pkBtnLp.leftMargin = dp(8)
+        side.addView(peakBtn, pkBtnLp)
+        val shLp = LinearLayout.LayoutParams(dp(34), dp(34))
+        shLp.leftMargin = dp(8)
+        side.addView(shotBtn, shLp)
         val ovlLp = LinearLayout.LayoutParams(dp(34), dp(34))
         ovlLp.leftMargin = dp(8)
         side.addView(ovlBtn, ovlLp)
@@ -994,7 +1032,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (on) {
             for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (hasFrame && !lost) {
-            side.visibility = View.VISIBLE
+            side.visibility = if (quickOn) View.VISIBLE else View.GONE
             lag.visibility = View.VISIBLE
             overlayImg.visibility = if (overlayBmp != null) View.VISIBLE else View.GONE
         }
@@ -1070,6 +1108,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         if (show && sceneV.text.toString() != t) sceneV.text = t
     }
 
+    /** Mostra o nasconde i tasti rapidi sotto il live view (zebra, peaking, screenshot, sovrapposizione). */
+    fun setQuick(on: Boolean) {
+        quickOn = on
+        if (!on) { side.visibility = View.GONE; ovlPanel.visibility = View.GONE }
+        else if (hasFrame && !lost && !shoot) side.visibility = View.VISIBLE
+    }
+
     /** Pulsanti screenshot e sovrapposizione dal lato esterno: a destra per il riquadro di destra, a sinistra per quello di sinistra. */
     fun setSide(right: Boolean) {
         val g = Gravity.BOTTOM or (if (right) Gravity.END else Gravity.START)
@@ -1107,7 +1152,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         img.setImageBitmap(b)
         lastFrame = b
         hasFrame = true
-        side.visibility = if (shoot) View.GONE else View.VISIBLE
+        side.visibility = if (shoot || !quickOn) View.GONE else View.VISIBLE
         overlayImg.visibility = if (overlayBmp != null && !shoot) View.VISIBLE else View.GONE
         msgBox.visibility = View.GONE
         lag.visibility = if (shoot) View.GONE else View.VISIBLE
@@ -1126,6 +1171,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         updateGuideBar()
         guideV.invalidate()
 
+        zebraBtn.active = Monitor.zebra
+        peakBtn.active = Monitor.peaking
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
         zebraImg.visibility = if (z != null && !shoot) View.VISIBLE else View.GONE
@@ -1578,6 +1625,7 @@ class MainActivity : AppCompatActivity() {
         stage.addView(tilesRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         tiles[0].setSide(false)
         tiles[1].setSide(true)
+        for (t in tiles) t.setQuick(prefs.getBoolean("quickbtns", true))
         for (i in 0..1) {
             val f = overlayFile(i)
             val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
@@ -1640,7 +1688,7 @@ class MainActivity : AppCompatActivity() {
         paintScene()
         setShootMode(prefs.getBoolean("shoot", false))
         rootView.postDelayed(alignRun, 500)
-        addLog("Doppia 1.12: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
+        addLog("Doppia 1.13: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -2638,6 +2686,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         col.addView(sectionTitle("Monitor"))
+        col.addView(toggleRow("Tasti rapidi sotto il live view (zebra, peaking, screenshot, sovrapposizione)", prefs.getBoolean("quickbtns", true)) {
+            prefs.edit().putBoolean("quickbtns", it).apply()
+            for (t in tiles) t.setQuick(it)
+        })
         col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
         val zl = listOf(70, 80, 90, 95, 100)
         col.addView(chooserRow("Livello zebra (%)", zl.map { it.toString() }, zl.indexOf(Monitor.zebraLevel).coerceAtLeast(0)) {
