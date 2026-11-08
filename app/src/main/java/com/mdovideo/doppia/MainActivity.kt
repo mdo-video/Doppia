@@ -1528,7 +1528,7 @@ class MainActivity : AppCompatActivity() {
         status.typeface = Typeface.MONOSPACE
         status.setPadding(dp(12), dp(5), dp(12), dp(5))
         status.background = roundBg(Pal.CARD, 14, this)
-        bar.addView(status, spaced(12))
+        bar.addView(status, spaced(10))
         updBtn = pillButton("⬆ Aggiorna")
         updBtn.backgroundTintList = ColorStateList.valueOf(Pal.MID)
         updBtn.setTextColor(Pal.BG)
@@ -1567,9 +1567,11 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
-        val setBtn = pillButton("Impostazioni")
+        val setBtn = pillButton("⚙")
+        setBtn.textSize = 18f
+        setBtn.contentDescription = "Impostazioni"
         setBtn.setOnClickListener { showSettings() }
-        syncBtn = pillButton("Sync")
+        syncBtn = pillButton("⇄ Sync")
         syncBtn.setOnClickListener {
             syncOn = !syncOn
             prefs.edit().putBoolean("sync", syncOn).apply()
@@ -1579,39 +1581,61 @@ class MainActivity : AppCompatActivity() {
             addLog(msg)
         }
         paintSync()
-        val goodBtn = pillButton("⚑ Buona")
+        val goodBtn = pillButton("✓")
         goodBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.GOOD])
         goodBtn.setTextColor(Pal.BG)
         goodBtn.setOnClickListener { addMark(MarkCat.GOOD, "") }
-        val badBtn = pillButton("⚑ Scarto")
+        val badBtn = pillButton("✕")
         badBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.BAD])
         badBtn.setTextColor(Pal.BG)
         badBtn.setOnClickListener { addMark(MarkCat.BAD, "") }
-        val noteBtn = pillButton("⚑ Nota")
+        val noteBtn = pillButton("✎")
         noteBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
         noteBtn.setTextColor(Pal.BG)
         noteBtn.setOnClickListener { noteDialog() }
         noteBtn.setOnLongClickListener { voiceNote(); true }
+        for ((mb, desc) in listOf(goodBtn to "Buona", badBtn to "Scarto", noteBtn to "Nota")) {
+            mb.contentDescription = desc
+            mb.textSize = 17f
+            mb.typeface = Typeface.DEFAULT_BOLD
+        }
         sceneBtn = pillButton("🎬 Scena")
-        sceneBtn.maxWidth = dp(260)
+        sceneBtn.maxWidth = dp(190)
         sceneBtn.maxLines = 1
         sceneBtn.ellipsize = android.text.TextUtils.TruncateAt.END
         sceneBtn.setOnClickListener { sceneDialog() }
         modeBtn = pillButton("▶ Ripresa")
         modeBtn.setOnClickListener { setShootMode(!shootMode) }
-        bar.addView(sceneBtn, spaced(10))
         val kelvinBtn = pillButton("🌡 Set WB")
         kelvinBtn.setOnClickListener { openKelvin() }
-        bar.addView(kelvinBtn, spaced(10))
-        bar.addView(syncBtn, spaced(10))
-        bar.addView(goodBtn, spaced(6))
-        bar.addView(badBtn, spaced(6))
-        bar.addView(noteBtn, spaced(6))
-        bar.addView(recAllBtn, spaced(6))
-        bar.addView(modeBtn, spaced(6))
-        bar.addView(setBtn, spaced(6))
-        // in Ripresa spariscono: aggiornamento, Sync, segni piccoli (ci sono quelli grandi in basso), Impostazioni
-        setupOnly.addAll(listOf<View>(updBtn, kelvinBtn, syncBtn, goodBtn, badBtn, noteBtn, setBtn))
+        // barra in tre gruppi: strumenti | segni | REC, modo e impostazioni
+        fun divider(): View {
+            val d = View(this)
+            d.setBackgroundColor(Pal.LINE)
+            return d
+        }
+        fun dividerLp(): LinearLayout.LayoutParams {
+            val lp = LinearLayout.LayoutParams(dp(1), dp(22))
+            lp.leftMargin = dp(10)
+            lp.rightMargin = dp(4)
+            return lp
+        }
+        val div1 = divider()
+        val div2 = divider()
+        bar.addView(sceneBtn, cLp(0))
+        bar.addView(kelvinBtn, cLp(6))
+        bar.addView(syncBtn, cLp(6))
+        bar.addView(div1, dividerLp())
+        bar.addView(goodBtn, cLp(6))
+        bar.addView(badBtn, cLp(6))
+        bar.addView(noteBtn, cLp(6))
+        bar.addView(div2, dividerLp())
+        bar.addView(recAllBtn, cLp(6))
+        bar.addView(modeBtn, cLp(6))
+        bar.addView(setBtn, cLp(6))
+        for (cb in listOf(updBtn, sceneBtn, kelvinBtn, syncBtn, goodBtn, badBtn, noteBtn, recAllBtn, modeBtn, setBtn)) compact(cb)
+        // in Ripresa spariscono: aggiornamento, Set WB, Sync, segni piccoli (ci sono quelli grandi in basso), Impostazioni
+        setupOnly.addAll(listOf<View>(updBtn, kelvinBtn, syncBtn, div1, goodBtn, badBtn, noteBtn, div2, setBtn))
         // In verticale i tasti possono non starci tutti: la barra scorre di lato
         val barScroll = HorizontalScrollView(this)
         barScroll.isHorizontalScrollBarEnabled = false
@@ -1726,6 +1750,21 @@ class MainActivity : AppCompatActivity() {
         for (i in 0 until MAX_CAMS) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
         for (i in 0 until MAX_CAMS) cams[i]?.stop()
         super.onDestroy()
+    }
+
+    /** Pulsante della barra in alto: basso e stretto, per far stare piu' cose nello stesso spazio. */
+    private fun compact(b: MaterialButton) {
+        b.minWidth = 0
+        b.minimumWidth = 0
+        b.minHeight = 0
+        b.minimumHeight = 0
+        b.setPadding(dp(12), 0, dp(12), 0)
+    }
+
+    private fun cLp(left: Int): LinearLayout.LayoutParams {
+        val p = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38))
+        p.leftMargin = dp(left)
+        return p
     }
 
     private fun pillButton(text: String): MaterialButton {
@@ -1999,7 +2038,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         shootRow.visibility = if (on) View.VISIBLE else View.GONE
-        modeBtn.text = if (on) "⚙ Setup" else "▶ Ripresa"
+        modeBtn.text = if (on) "◀ Setup" else "▶ Ripresa"
         for (t in tiles) t.setShootMode(on)
         updateAddBtn()
         if (on) settingsDlg?.dismiss()
