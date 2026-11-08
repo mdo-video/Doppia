@@ -320,7 +320,7 @@ class KelvinPanel(private val host: KelvinHost) {
         ).apply { topMargin = dp(12) })
 
         dlg.setContentView(ScrollView(act).apply { addView(root) })
-        dlg.window?.setBackgroundDrawable(roundBg(Pal.CARD, 28, act))
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, act))
         dlg.setOnDismissListener {
             stopAll()
             host.onKelvinClosed()

@@ -52,6 +52,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -1659,11 +1661,12 @@ class MainActivity : AppCompatActivity() {
         add.text = "+"
         add.textSize = 26f
         add.typeface = Typeface.DEFAULT_BOLD
-        add.setTextColor(Pal.BG)
+        add.setTextColor(Pal.ON_PRIMARY_CONTAINER)
         add.gravity = Gravity.CENTER
-        add.background = roundBg(Pal.MID, 30, this)
+        add.background = roundBg(Pal.PRIMARY_CONTAINER, 16, this)
+        add.elevation = dp(6).toFloat()
         add.setOnClickListener { addCamera() }
-        stage.addView(add, FrameLayout.LayoutParams(dp(48), dp(48)))
+        stage.addView(add, FrameLayout.LayoutParams(dp(56), dp(56)))
         addBtn = add
         tilesRow.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionAdd() }
         updateAddBtn()
@@ -1957,7 +1960,7 @@ class MainActivity : AppCompatActivity() {
     private fun showUpdateDialog(r: Updater.Release) {
         val mb = if (r.size > 0) String.format(Locale.ROOT, " (%.1f MB)", r.size / 1048576.0) else ""
         val notes = r.notes.trim().take(500)
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Nuova versione disponibile")
             .setMessage("Installata: ${installedName()}\nNuova: ${r.name}$mb" + (if (notes.isNotEmpty()) "\n\n$notes" else ""))
             .setPositiveButton("Aggiorna") { _, _ -> startUpdate(r) }
@@ -1971,7 +1974,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!packageManager.canRequestPackageInstalls()) {
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setMessage("Per installare l'aggiornamento devi permettere a Doppia di installare app. Nella schermata che si apre attiva l'interruttore, poi torna qui e tocca di nuovo Aggiorna.")
                 .setPositiveButton("Apri impostazioni") { _, _ ->
                     startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
@@ -1984,7 +1987,7 @@ class MainActivity : AppCompatActivity() {
         dir.mkdirs()
         val dest = File(dir, "Doppia.apk")
         updCancel = false
-        val dlg = AlertDialog.Builder(this)
+        val dlg = MaterialAlertDialogBuilder(this)
             .setTitle("Scarico ${r.name}")
             .setMessage("0%")
             .setCancelable(false)
@@ -2189,7 +2192,7 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(col)
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dlg.setContentView(scroll)
-        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, this))
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
         dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -2578,7 +2581,7 @@ class MainActivity : AppCompatActivity() {
         val d = Dialog(this)
         d.requestWindowFeature(Window.FEATURE_NO_TITLE)
         d.setContentView(col)
-        d.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        d.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, this))
         d.setOnCancelListener { stopVoice() }
         voiceDlg = d
         d.show()
@@ -2698,7 +2701,7 @@ class MainActivity : AppCompatActivity() {
 
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dlg.setContentView(col)
-        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, this))
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
         dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -2901,8 +2904,8 @@ class MainActivity : AppCompatActivity() {
             cx = (a[0] + t0.width + c[0]) / 2f - o[0]
             cy = (a[1] - o[1]) + t0.height / 2f
         }
-        b.x = cx - dp(24)
-        b.y = cy - dp(24)
+        b.x = cx - dp(28)
+        b.y = cy - dp(28)
     }
 
     /** Il "+" si vede solo in Setup, con tutte le anteprime visibili e se c'e' ancora posto. */
@@ -3154,7 +3157,7 @@ class MainActivity : AppCompatActivity() {
         val mclear = pillButton("Azzera sessione")
         mclear.setOnClickListener {
             if (Session.takes.isEmpty() && Session.marks.isEmpty()) return@setOnClickListener
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setMessage("Cancellare tutti i take e i segni?")
                 .setPositiveButton("Cancella") { _, _ ->
                     Session.reset()
@@ -3226,7 +3229,7 @@ class MainActivity : AppCompatActivity() {
         val dlg = Dialog(this)
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dlg.setContentView(scroll)
-        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE, 24, this))
+        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, this))
         dlg.setOnDismissListener { settingsDlg = null; settingsParams = null; stopBtns.fill(null) }
         close.setOnClickListener { dlg.dismiss() }
         logBtn.setOnClickListener { dlg.dismiss(); showLog(true) }
@@ -3359,11 +3362,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun sectionTitle(text: String): TextView {
         val t = TextView(this)
-        t.text = text.uppercase(Locale.ROOT)
+        t.text = text
         t.setTextColor(Pal.MID)
-        t.textSize = 12f
+        t.textSize = 14f
         t.typeface = Typeface.DEFAULT_BOLD
-        t.setPadding(0, dp(18), 0, dp(6))
+        t.setPadding(dp(2), dp(20), 0, dp(8))
         return t
     }
 
@@ -3377,7 +3380,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
-        val sw = SwitchCompat(this)
+        val sw = MaterialSwitch(this)
         sw.text = label
         sw.setTextColor(Pal.TEXT)
         sw.textSize = 15f
@@ -3538,7 +3541,7 @@ class MainActivity : AppCompatActivity() {
         et.gravity = Gravity.CENTER
         et.hint = "····"
         et.setHintTextColor(Pal.MUTED)
-        val dlg = android.app.AlertDialog.Builder(this)
+        val dlg = MaterialAlertDialogBuilder(this)
             .setTitle(if (saved == null) "Scegli un PIN di 4 cifre" else "Inserisci il PIN")
             .setView(et)
             .setPositiveButton("OK") { _, _ ->
