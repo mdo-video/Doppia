@@ -3530,34 +3530,79 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, if (on) "Modalità test: tocca Connetti sui riquadri" else "Modalità test spenta", Toast.LENGTH_LONG).show()
     }
 
-    /** Chiede il PIN (la prima volta lo si sceglie, 4 cifre) e chiama done(true) se e' giusto. */
+    /** Chiede il PIN con un tastierino a schermo (la prima volta lo si sceglie, 4 cifre) e chiama done(true) se e' giusto. */
     private fun askPin(done: (Boolean) -> Unit) {
         val saved = prefs.getString("testpin", null)
-        val et = EditText(this)
-        et.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        et.filters = arrayOf(android.text.InputFilter.LengthFilter(4))
-        et.setTextColor(Pal.TEXT)
-        et.textSize = 24f
-        et.gravity = Gravity.CENTER
-        et.hint = "····"
-        et.setHintTextColor(Pal.MUTED)
-        val dlg = MaterialAlertDialogBuilder(this)
-            .setTitle(if (saved == null) "Scegli un PIN di 4 cifre" else "Inserisci il PIN")
-            .setView(et)
-            .setPositiveButton("OK") { _, _ ->
-                val v = et.text.toString()
-                if (saved == null) {
-                    if (v.length == 4) { prefs.edit().putString("testpin", v).apply(); done(true) }
-                    else { Toast.makeText(this, "Servono 4 cifre", Toast.LENGTH_SHORT).show(); done(false) }
-                } else if (v == saved) {
-                    done(true)
-                } else {
-                    Toast.makeText(this, "PIN sbagliato", Toast.LENGTH_SHORT).show(); done(false)
-                }
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER_HORIZONTAL
+        box.setPadding(dp(16), dp(8), dp(16), dp(8))
+        val dots = TextView(this)
+        dots.textSize = 30f
+        dots.gravity = Gravity.CENTER
+        dots.setTextColor(Pal.TEXT)
+        box.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = dp(12) })
+        var entered = ""
+        val ref = arrayOfNulls<AlertDialog>(1)
+        fun paint() { dots.text = (0 until 4).joinToString("  ") { if (it < entered.length) "●" else "○" } }
+        paint()
+        fun submit() {
+            val v = entered
+            if (saved == null) {
+                prefs.edit().putString("testpin", v).apply()
+                ref[0]?.dismiss()
+                done(true)
+            } else if (v == saved) {
+                ref[0]?.dismiss()
+                done(true)
+            } else {
+                Toast.makeText(this, "PIN sbagliato", Toast.LENGTH_SHORT).show()
+                entered = ""
+                paint()
             }
+        }
+        fun key(label: String, onTap: () -> Unit): View {
+            val t = TextView(this)
+            t.text = label
+            t.textSize = 24f
+            t.typeface = Typeface.DEFAULT_BOLD
+            t.gravity = Gravity.CENTER
+            t.setTextColor(Pal.TEXT)
+            t.background = roundBg(Pal.LINE, 34, this)
+            t.setOnClickListener { onTap() }
+            Springs.pressable(t)
+            return t
+        }
+        val labels = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫")
+        for (r in 0 until 4) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            for (c in 0 until 3) {
+                val lab = labels[r * 3 + c]
+                val v: View = when (lab) {
+                    "" -> View(this)
+                    "⌫" -> key(lab) { if (entered.isNotEmpty()) { entered = entered.dropLast(1); paint() } }
+                    else -> key(lab) {
+                        if (entered.length < 4) {
+                            entered += lab
+                            paint()
+                            if (entered.length == 4) submit()
+                        }
+                    }
+                }
+                val lp = LinearLayout.LayoutParams(dp(68), dp(68))
+                lp.setMargins(dp(6), dp(6), dp(6), dp(6))
+                row.addView(v, lp)
+            }
+            box.addView(row)
+        }
+        ref[0] = MaterialAlertDialogBuilder(this)
+            .setTitle(if (saved == null) "Scegli un PIN di 4 cifre" else "Inserisci il PIN")
+            .setView(box)
             .setNegativeButton("Annulla") { _, _ -> done(false) }
+            .setOnCancelListener { done(false) }
             .create()
-        dlg.show()
+        ref[0]?.show()
     }
 
     private fun toggle(i: Int) {
