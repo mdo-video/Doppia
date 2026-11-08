@@ -620,20 +620,41 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     // Batteria scarica: l'indicatore lampeggia (solo visivo)
     private var lowBattOn = false
     private var blinkPh = false
+    private var blinkQueued = false
     private val battBlink = object : Runnable {
         override fun run() {
+            blinkQueued = false
             if (!lowBattOn) return
             blinkPh = !blinkPh
             batt.alpha = if (lost) 0.5f else if (blinkPh) 0.15f else 1f
+            blinkQueued = true
             postDelayed(this, 500L)
         }
     }
 
-    fun setLowBattery(on: Boolean) {
-        if (on == lowBattOn) return
-        lowBattOn = on
+    /** Fa partire il ciclo solo se non e' gia' in coda (si chiama a ogni aggiornamento, non deve riavviarlo). */
+    private fun startBattBlink() {
+        if (!lowBattOn || blinkQueued) return
+        blinkQueued = true
+        post(battBlink)
+    }
+
+    /** Dopo un distacco dalla finestra i callback in coda possono perdersi: si riparte da zero. */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
         removeCallbacks(battBlink)
-        if (on) post(battBlink) else batt.alpha = if (lost) 0.5f else 1f
+        blinkQueued = false
+        startBattBlink()
+    }
+
+    fun setLowBattery(on: Boolean) {
+        lowBattOn = on
+        if (on) startBattBlink()
+        else {
+            removeCallbacks(battBlink)
+            blinkQueued = false
+            batt.alpha = if (lost) 0.5f else 1f
+        }
     }
 
     /** Riallinea i pulsanti guide / zebra / peaking e cio' che mostrano con le impostazioni correnti. */
@@ -1577,7 +1598,7 @@ class MainActivity : AppCompatActivity() {
         modeBtn = pillButton("▶ Ripresa")
         modeBtn.setOnClickListener { setShootMode(!shootMode) }
         bar.addView(sceneBtn, spaced(10))
-        val kelvinBtn = pillButton("🌡 Kelvin")
+        val kelvinBtn = pillButton("🌡 Set WB")
         kelvinBtn.setOnClickListener { openKelvin() }
         bar.addView(kelvinBtn, spaced(10))
         bar.addView(syncBtn, spaced(10))

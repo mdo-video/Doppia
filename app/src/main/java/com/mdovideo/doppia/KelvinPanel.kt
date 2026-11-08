@@ -154,7 +154,7 @@ class KelvinPanel(private val host: KelvinHost) {
             gravity = Gravity.CENTER_VERTICAL
         }
         head.addView(TextView(act).apply {
-            text = "Kelvin"
+            text = "Set WB"
             textSize = 22f
             setTextColor(Pal.TEXT)
             typeface = Typeface.DEFAULT_BOLD

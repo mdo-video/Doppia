@@ -1,4 +1,4 @@
-# Doppia 1.12 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.13 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,10 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 1.13
+- **Batteria sotto il 15%**: l'indicatore lampeggia in modo affidabile (il ciclo riparte da solo dopo cambi di schermata, riconnessioni e ritorni dall'app).
+- Il tasto **🌡 Kelvin** si chiama ora **🌡 Set WB** (e cosi' il titolo della finestra).
 
 ## Novita' 1.12
 - **Nuovi pulsanti sul riquadro** (accanto a screenshot e sovrapposizione, in Setup): **guide** (riquadri di inquadratura e zona sicura), **zebra** e **focus peaking**. Si accendono e spengono con un tocco; giallo = acceso. Le guide che hai scelto in Impostazioni restano memorizzate.
