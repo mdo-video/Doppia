@@ -22,6 +22,9 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.Settings
 import android.os.SystemClock
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -1489,6 +1492,7 @@ class MainActivity : AppCompatActivity() {
         noteBtn.backgroundTintList = ColorStateList.valueOf(MarkCat.colors[MarkCat.NOTE])
         noteBtn.setTextColor(Pal.BG)
         noteBtn.setOnClickListener { noteDialog() }
+        attachVoice(noteBtn)
         sceneBtn = pillButton("🎬 Scena")
         sceneBtn.maxWidth = dp(260)
         sceneBtn.maxLines = 1
@@ -1592,7 +1596,7 @@ class MainActivity : AppCompatActivity() {
             b.insetTop = 0
             b.insetBottom = 0
             b.setOnClickListener { action() }
-            Springs.pressable(b)
+            if (cat == MarkCat.NOTE) attachVoice(b) else Springs.pressable(b)
             val lp = LinearLayout.LayoutParams(0, dp(76), 1f)
             if (shootRow.childCount > 0) lp.leftMargin = dp(10)
             shootRow.addView(b, lp)
@@ -1610,7 +1614,7 @@ class MainActivity : AppCompatActivity() {
         paintScene()
         setShootMode(prefs.getBoolean("shoot", false))
         rootView.postDelayed(alignRun, 500)
-        addLog("Doppia 1.8: Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
+        addLog("Doppia 1.11: note vocali, avvisi batteria e memoria. Ripresa, stop protetto, riconnessione, nomi dei take, WB.")
         val mine = localIpv4()
         addLog(if (mine.isEmpty()) "Il tablet non è collegato a nessuna rete" else "Rete del tablet: ${mine.joinToString(", ")}")
         Thread { try { File(cacheDir, "update").deleteRecursively() } catch (_: Throwable) {} }.start()
@@ -1626,6 +1630,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try { recognizer?.destroy() } catch (_: Throwable) {}
         rootView.removeCallbacks(alignRun)
         for (i in 0..1) { want[i] = false; retryRun[i]?.let { rootView.removeCallbacks(it) } }
         for (i in 0..1) cams[i]?.stop()
@@ -2256,7 +2261,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Segna un momento sul take in corso di ogni camera che registra (tempo dall'inizio del take). */
-    private fun addMark(cat: Int, note: String) {
+    private fun addMark(cat: Int, note: String, backMs: Long = 0L) {
         val lag = prefs.getInt("reclag", 300)
         val refs = ArrayList<Ref>()
         val sb = StringBuilder(MarkCat.names[cat])
@@ -2265,7 +2270,7 @@ class MainActivity : AppCompatActivity() {
             val ms = tiles[i].recElapsedMs()
             val tk = Session.openTake(i)
             if (ms < 0L || tk == null) continue
-            val off = ms + lag
+            val off = (ms + lag - backMs).coerceAtLeast(0L)
             refs.add(Ref(i, tk.num, off))
             sb.append("   ").append(camName(i)).append(' ').append(tc((off / 1000L).toInt()))
         }
@@ -2274,6 +2279,105 @@ class MainActivity : AppCompatActivity() {
         Session.save(prefs)
         addLog("Segno: $sb")
         Toast.makeText(this, "⚑ $sb", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---- Nota vocale: tieni premuto ⚑ Nota, parla, rilascia ----
+    private var recognizer: SpeechRecognizer? = null
+    private var voiceActive = false
+    private var voiceStartAt = 0L
+    private var voiceGotResult = false
+
+    /** Tocco breve = finestra Nota. Tenuto premuto = si detta (riconoscimento vocale Android in italiano), al rilascio il testo diventa la nota. */
+    private fun attachVoice(b: View) {
+        Springs.pressable(b) { e ->
+            if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) && voiceActive) {
+                try { recognizer?.stopListening() } catch (_: Throwable) {}
+            }
+        }
+        b.setOnLongClickListener {
+            b.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            startVoiceNote()
+            true
+        }
+    }
+
+    private fun startVoiceNote() {
+        if (voiceActive) return
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 7)
+            Toast.makeText(this, "Consenti il microfono, poi tieni premuto di nuovo ⚑ Nota", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Il riconoscimento vocale non e' disponibile su questo tablet: scrivi la nota", Toast.LENGTH_LONG).show()
+            addLog("Nota vocale: riconoscimento vocale non disponibile")
+            noteDialog()
+            return
+        }
+        voiceStartAt = SystemClock.elapsedRealtime()
+        voiceGotResult = false
+        voiceActive = true
+        try { recognizer?.destroy() } catch (_: Throwable) {}
+        val r = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = r
+        r.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                Toast.makeText(this@MainActivity, "🎤 Parla, rilascia per finire", Toast.LENGTH_SHORT).show()
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+            override fun onResults(results: Bundle?) {
+                if (voiceGotResult) return
+                voiceGotResult = true
+                voiceActive = false
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
+                finishVoice(text)
+            }
+            override fun onError(error: Int) {
+                if (voiceGotResult) return
+                voiceGotResult = true
+                voiceActive = false
+                addLog("Nota vocale: errore $error")
+                finishVoice("")
+            }
+        })
+        val ri = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        ri.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        ri.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
+        ri.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        ri.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        try { r.startListening(ri) } catch (t: Throwable) {
+            voiceActive = false
+            addLog("Nota vocale: ${t.message}")
+            noteDialog()
+        }
+    }
+
+    /** Il segno prende l'istante in cui hai iniziato a tenere premuto, non quello in cui il testo e' pronto. */
+    private fun finishVoice(text: String) {
+        val back = SystemClock.elapsedRealtime() - voiceStartAt
+        val note = if (text.isEmpty()) "(nota vocale non capita)" else text
+        addMark(MarkCat.NOTE, note, back)
+    }
+
+    // ---- Avvisi batteria e memoria in esaurimento ----
+    private val lowBatSent = BooleanArray(2)
+    private val lowMemSent = BooleanArray(2)
+
+    private fun checkLow(i: Int, bl: Int?, memSec: Long?) {
+        if (!prefs.getBoolean("lowwarn", true)) return
+        if (bl != null) {
+            if (bl <= 15 && !lowBatSent[i]) { lowBatSent[i] = true; alertCam(i, "Batteria bassa: $bl%") }
+            else if (bl > 20) lowBatSent[i] = false
+        }
+        if (memSec != null) {
+            if (memSec <= 600L && !lowMemSent[i]) { lowMemSent[i] = true; alertCam(i, "Memoria in esaurimento: ${SonyProps.fmtRemain(memSec)}") }
+            else if (memSec > 900L) lowMemSent[i] = false
+        }
     }
 
     /** Nota: frasi rapide a un tocco oppure testo libero (anche con il microfono della tastiera). */
@@ -2584,6 +2688,10 @@ class MainActivity : AppCompatActivity() {
 
         col.addView(toggleRow("Avviso REC non allineato (lampeggia il riquadro che non registra, se l'altra registra)", prefs.getBoolean("alignwarn", true)) {
             prefs.edit().putBoolean("alignwarn", it).apply()
+        })
+
+        col.addView(toggleRow("Avviso batteria sotto il 15% e memoria sotto i 10 minuti (vibrazione e suono, anche in Ripresa)", prefs.getBoolean("lowwarn", true)) {
+            prefs.edit().putBoolean("lowwarn", it).apply()
         })
 
         val mrow = FlowRow(this, dp(8))
@@ -3092,6 +3200,7 @@ class MainActivity : AppCompatActivity() {
             lastMem[i]?.let { e.putString("lmem$i", it) }
             e.apply()
         }
+        checkLow(i, bl, SonyProps.mediaSeconds(m).filterNotNull().maxOrNull())
         if (SonyProps.overheat(m) && System.currentTimeMillis() - lastHeat[i] > 60000L) {
             lastHeat[i] = System.currentTimeMillis()
             alertCam(i, "Camera calda: rischio di spegnimento")
