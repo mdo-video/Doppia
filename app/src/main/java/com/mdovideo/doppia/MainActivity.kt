@@ -558,6 +558,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val meterBox = LinearLayout(ctx)
     private val meterV = MeterView(ctx)
     private val histV = HistView(ctx)
+    private val castV = TextView(ctx)
     private val picker = HorizontalScrollView(ctx)
     private val pickerRow = LinearLayout(ctx)
     private val chipBox = HashMap<Int, LinearLayout>()
@@ -886,6 +887,18 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         hp.setMargins(dp(12), 0, 0, dp(12))
         addView(histV, hp)
 
+        // Dominante colore e confronto con la camera A, sopra l'istogramma
+        castV.visibility = View.GONE
+        castV.textSize = 11f
+        castV.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        castV.setTextColor(Pal.TEXT)
+        castV.background = roundBg(0x990B0F15.toInt(), 8, ctx)
+        castV.setPadding(dp(7), dp(4), dp(7), dp(4))
+        val cpLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        cpLp.gravity = Gravity.BOTTOM or Gravity.START
+        cpLp.setMargins(dp(12), 0, 0, dp(12 + 60 + 6))
+        addView(castV, cpLp)
+
         // Barra monitor in basso: REC | otturatore diaframma ISO | esposimetro
         bar.orientation = LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
@@ -1087,7 +1100,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlPanel.visibility = View.GONE
         updateChips()
         if (on) {
-            for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, meterBox, overlayImg)) v.visibility = View.GONE
+            for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, castV, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (hasFrame && !lost) {
             side.visibility = View.VISIBLE
             lag.visibility = View.VISIBLE
@@ -1105,7 +1118,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             img.alpha = 0.3f
             batt.alpha = 0.5f
             closePicker()
-            for (v in arrayOf<View>(zebraImg, peakImg, histV, lag, side, bar, guideBar, ovlPanel, meterBox, overlayImg)) v.visibility = View.GONE
+            for (v in arrayOf<View>(zebraImg, peakImg, histV, castV, lag, side, bar, guideBar, ovlPanel, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (lost) {
             lost = false
             lostBox.visibility = View.GONE
@@ -1175,7 +1188,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         overlayImg.visibility = if (b != null && hasFrame) View.VISIBLE else View.GONE
     }
 
-    fun setFrame(b: Bitmap, ms: Int, a: Analysis?) {
+    fun setFrame(b: Bitmap, ms: Int, a: Analysis?, cmp: String? = null) {
         img.setImageBitmap(b)
         lastFrame = b
         hasFrame = true
@@ -1211,6 +1224,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         histV.bins = a?.hist
         histV.visibility = if (a?.hist != null && !shoot) View.VISIBLE else View.GONE
 
+        if (a != null && a.hasColor && Monitor.cast && !shoot) {
+            castV.text = castText(a.tint, a.warm) + (if (cmp != null) "\n" + cmp else "")
+            castV.visibility = View.VISIBLE
+        } else {
+            castV.visibility = View.GONE
+        }
+
         if (a != null && Monitor.meter && !shoot) {
             evSmooth = evSmooth * 0.8f + a.ev * 0.2f
             meterV.ev = evSmooth
@@ -1218,6 +1238,15 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         } else {
             meterBox.visibility = View.GONE
         }
+    }
+
+    /** Testo della dominante colore di questa camera (media dell'immagine, non una misura con carta grigia). */
+    private fun castText(tint: Float, warm: Float): String {
+        val t = Math.round(tint)
+        val w = Math.round(warm)
+        val ts = if (Math.abs(tint) < 1.5f) "tinta neutra" else if (tint > 0) "verde +$t" else "magenta ${-t}"
+        val ws = if (Math.abs(warm) < 1.5f) "neutro" else if (warm > 0) "caldo +$w" else "freddo ${-w}"
+        return "$ts · $ws"
     }
 
     /** Secondi di registrazione (contati dall'app da quando rileva il REC), -1 se non registra. */
@@ -1411,6 +1440,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         guideV.visibility = View.GONE
         guideBar.visibility = View.GONE
         histV.visibility = View.GONE
+        castV.visibility = View.GONE
         meterBox.visibility = View.GONE
         lag.visibility = View.GONE
         empty.text = text
@@ -3121,6 +3151,7 @@ class MainActivity : AppCompatActivity() {
         guideCol.addView(toggleRow("Zona sicura 9:16 (approssimata, segue la guida 9:16)", Monitor.safe) { Monitor.safe = it; Monitor.save(prefs) })
         col.addView(toggleRow("Istogramma", Monitor.histogram) { Monitor.histogram = it; Monitor.save(prefs) })
         col.addView(toggleRow("Esposimetro (stimato dall'immagine)", Monitor.meter) { Monitor.meter = it; Monitor.save(prefs) })
+        col.addView(toggleRow("Dominante colore e confronto con la camera A", Monitor.cast) { Monitor.cast = it; Monitor.save(prefs) })
 
         col = newPage("Parametri camera", "Esposizione, misurazione, bilanciamento del bianco (camere collegate)")
         val params = LinearLayout(this)
@@ -3699,6 +3730,37 @@ class MainActivity : AppCompatActivity() {
         connect(i, false)
     }
 
+    // Confronto A/B: letture lisciate di ogni camera (esposizione, tinta, caldo) e istante dell'ultimo fotogramma
+    private val cmpLock = Any()
+    private val cmpEv = FloatArray(MAX_CAMS)
+    private val cmpTint = FloatArray(MAX_CAMS)
+    private val cmpWarm = FloatArray(MAX_CAMS)
+    private val cmpAt = LongArray(MAX_CAMS)
+
+    /** Registra la lettura della camera i; per le camere dopo la A ritorna il confronto con la A (o null). */
+    private fun compareText(i: Int, a: Analysis?): String? {
+        if (a == null || !a.hasColor || !Monitor.cast) return null
+        val now = android.os.SystemClock.elapsedRealtime()
+        var res: String? = null
+        synchronized(cmpLock) {
+            val fresh = now - cmpAt[i] < 3000
+            cmpEv[i] = if (fresh) cmpEv[i] * 0.8f + a.ev * 0.2f else a.ev
+            cmpTint[i] = if (fresh) cmpTint[i] * 0.8f + a.tint * 0.2f else a.tint
+            cmpWarm[i] = if (fresh) cmpWarm[i] * 0.8f + a.warm * 0.2f else a.warm
+            cmpAt[i] = now
+            if (i != 0 && now - cmpAt[0] <= 2000) {
+                val dEv = cmpEv[i] - cmpEv[0]
+                val dT = cmpTint[i] - cmpTint[0]
+                val dW = cmpWarm[i] - cmpWarm[0]
+                val e = if (Math.abs(dEv) < 0.15f) "luce uguale" else String.format(java.util.Locale.ROOT, "%+.1f EV", dEv)
+                val t = if (Math.abs(dT) < 1.5f) "tinta uguale" else if (dT > 0) "+${Math.round(dT)} verde" else "${-Math.round(dT)} magenta"
+                val w = if (Math.abs(dW) < 1.5f) "calore uguale" else if (dW > 0) "+${Math.round(dW)} caldo" else "${-Math.round(dW)} freddo"
+                res = "vs ${camName(0)}: $e · $t · $w"
+            }
+        }
+        return res
+    }
+
     /** Collega la camera i. isRetry = tentativo automatico dopo un collegamento perso (il log resta corto). */
     private fun connect(i: Int, isRetry: Boolean) {
         val ip = if (simOn) "sim$i" else (prefs.getString("ip$i", "") ?: "").trim()
@@ -3714,7 +3776,8 @@ class MainActivity : AppCompatActivity() {
             { st -> runOnUiThread { onState(i, st) } },
             { bmp, ms ->
                 val a = Monitor.analyze(bmp)
-                runOnUiThread { tiles[i].setFrame(bmp, ms, a) }
+                val cmp = compareText(i, a)
+                runOnUiThread { tiles[i].setFrame(bmp, ms, a, cmp) }
             },
             { m -> runOnUiThread { tiles[i].setProps(m); noteInfo(i, m); refreshSettings() } },
             simOn
