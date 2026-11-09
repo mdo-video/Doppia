@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.HorizontalScrollView
@@ -97,6 +98,7 @@ class Wheel(ctx: Context) : HorizontalScrollView(ctx) {
         if (i != lastIdx) {
             lastIdx = i
             invalidate()
+            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             onCenter?.invoke(i, false)
         }
         removeCallbacks(settleRun)

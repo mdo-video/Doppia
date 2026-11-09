@@ -49,7 +49,6 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -922,7 +921,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             sendRec()
         }
         recBtn.onHoldStop = { if (recording && !recBtn.pending) sendRec() }
-        bar.addView(recBtn, LinearLayout.LayoutParams(dp(46), dp(46)))
+        bar.addView(recBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
         val dv = divider()
         barDivider = dv
         bar.addView(dv)
@@ -934,6 +933,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             box.orientation = LinearLayout.VERTICAL
             box.gravity = Gravity.CENTER
             box.setPadding(dp(9), dp(3), dp(9), dp(3))
+            box.minimumHeight = dp(48)
+            box.minimumWidth = dp(48)
             val t = TextView(ctx)
             t.text = titles[k]
             t.textSize = 9f
@@ -970,7 +971,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         pickerRow.setPadding(dp(8), dp(4), dp(8), dp(4))
         picker.isHorizontalScrollBarEnabled = false
         picker.isHorizontalFadingEdgeEnabled = true
-        picker.setFadingEdgeLength(dp(36))
+        picker.setFadingEdgeLength(dp(56))
         picker.addView(pickerRow)
         picker.background = roundBg(0xE60B0F15.toInt(), 16, ctx)
         picker.visibility = View.GONE
@@ -996,8 +997,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlBtn.setOnClickListener {
             ovlPanel.visibility = if (ovlPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        side.addView(shotBtn, LinearLayout.LayoutParams(dp(34), dp(34)))
-        val ovlLp = LinearLayout.LayoutParams(dp(34), dp(34))
+        side.addView(shotBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        val ovlLp = LinearLayout.LayoutParams(dp(44), dp(44))
         ovlLp.leftMargin = dp(8)
         side.addView(ovlBtn, ovlLp)
         guideBtn.kind = IconButton.Kind.GUIDES
@@ -1007,7 +1008,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         peakBtn.kind = IconButton.Kind.PEAK
         peakBtn.setOnClickListener { onTogglePeak?.invoke() }
         for (b in arrayOf(guideBtn, zebraBtn, peakBtn)) {
-            val lp = LinearLayout.LayoutParams(dp(34), dp(34))
+            val lp = LinearLayout.LayoutParams(dp(44), dp(44))
             lp.leftMargin = dp(8)
             side.addView(b, lp)
         }
@@ -1096,7 +1097,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             chipBox[code]?.visibility = if (show) View.VISIBLE else View.GONE
         }
         barDivider?.visibility = if (shoot) View.GONE else View.VISIBLE
-        val sz = dp(if (shoot) 64 else 46)
+        val sz = dp(if (shoot) 64 else 48)
         val lp = recBtn.layoutParams
         if (lp != null && lp.width != sz) {
             lp.width = sz
@@ -1441,6 +1442,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         textSize = 17f
         typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         setPadding(dp(10), dp(8), dp(10), dp(8))
+        minHeight = dp(48)
+        gravity = Gravity.CENTER_VERTICAL
     }
 
     /** Switch AF / MF: si tocca o si fa scorrere; se la camera ha piu' modi AF (AF-S, AF-C) compaiono accanto per sceglierli. */
@@ -1452,7 +1455,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         var busy = false
         val left = pickerLabel("AF")
         val right = pickerLabel("MF")
-        val sw = SwitchCompat(context)
+        val sw = MaterialSwitch(context)
         val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
         sw.thumbTintList = ColorStateList(states, intArrayOf(Pal.MID, Pal.TEXT))
         sw.trackTintList = ColorStateList(states, intArrayOf(0x66FFC107.toInt(), 0x55E8EDF3.toInt()))
@@ -1507,6 +1510,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             t.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             t.setTextColor(Pal.TEXT)
             t.setPadding(dp(14), dp(8), dp(14), dp(8))
+            t.minHeight = dp(48)
+            t.gravity = Gravity.CENTER_VERTICAL
             t.setOnClickListener { picker.smoothScrollTo((t.left + t.right) / 2 - picker.width / 2, 0) }
             pickerRow.addView(t)
             items.add(t)
@@ -2397,7 +2402,7 @@ class MainActivity : AppCompatActivity() {
             col.addView(chipsRow(presets) { et.setText(it); et.setSelection(it.length) }, lpTop())
         }
 
-        val dlg = Dialog(this)
+        lateinit var dlg: AlertDialog
         fun save() {
             val sc = sceneEt.text.toString().trim()
             val ed = prefs.edit().putString("scene", sc)
@@ -2432,9 +2437,7 @@ class MainActivity : AppCompatActivity() {
 
         val scroll = ScrollView(this)
         scroll.addView(col)
-        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dlg.setContentView(scroll)
-        dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, this))
+        dlg = MaterialAlertDialogBuilder(this).setView(scroll).create()
         dlg.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dlg.show()
         dlg.window?.setLayout(dlgWidth(0.55f), ViewGroup.LayoutParams.WRAP_CONTENT)

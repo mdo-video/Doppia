@@ -55,7 +55,9 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Valori da scorrere col dito**: Kelvin, otturatore, diaframma, ISO, WB, EV e gli altri valori della barra non si premono piu': si fa scorrere la fila e vale il valore **al centro** (evidenziato su una fascia gialla). Si ferma da sola sul valore piu' vicino e lo manda alla camera; i Kelvin vengono mandati anche mentre scorri, quelli come otturatore e ISO quando ti fermi.
 - **Fila piu' corta**: la ruota e' larga al massimo 300 dp e sta al centro, non piu' per tutta la larghezza. I valori ai bordi (come **AUTO** dell'ISO) arrivano sempre al centro.
 - **Funziona anche a tutto schermo**: lo slider dei Kelvin stava dentro a una fila scorrevole che si prendeva il tocco; ora la ruota e' lei stessa lo scorrimento.
-- Lo switch **AF/MF** resta com'e'.
+- Lo switch **AF/MF** resta com'e' ma e' ora un interruttore Material 3; il dialogo Scena usa il dialogo Material 3.
+- **Ruota dei valori**: un tick di vibrazione a ogni valore e bordi sfumati piu' marcati.
+- **Aree di tocco da 48 dp** per i valori della barra, il REC, i pulsanti sul riquadro e i valori della ruota.
 
 ## Novita' 1.17
 - **Switch AF/MF e slider Kelvin**: FOCUS ora e' un interruttore da toccare o far scorrere; i Kelvin si scelgono trascinando uno slider invece di scorrere un elenco lungo.
