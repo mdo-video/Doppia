@@ -141,7 +141,8 @@ class Wheel(ctx: Context) : HorizontalScrollView(ctx) {
             val c = row()?.getChildAt(i)
             if (c != null) {
                 val half = c.width / 2f
-                rect.set(width / 2f - half, dp(4).toFloat(), width / 2f + half, height - dp(4).toFloat())
+                val cx = scrollX + width / 2f   // il canvas e' nelle coordinate del contenuto: va sommato lo scorrimento
+                rect.set(cx - half, dp(4).toFloat(), cx + half, height - dp(4).toFloat())
                 canvas.drawRoundRect(rect, dp(10).toFloat(), dp(10).toFloat(), mark)
             }
         }
