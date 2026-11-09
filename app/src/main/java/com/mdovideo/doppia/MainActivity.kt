@@ -570,7 +570,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val pickerRow = LinearLayout(ctx)
     private val chipBox = HashMap<Int, LinearLayout>()
     private val chipVal = HashMap<Int, TextView>()
-    private val chipCodes = intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.WB, SonyProps.KELVIN)
+    private val chipCodes = intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.WB, SonyProps.KELVIN, SonyProps.FOCUS_MODE)
     private val pickerItems = ArrayList<Pair<Long, TextView>>()
     private var props: Map<Int, Prop> = emptyMap()
     private var pickerCode = 0
@@ -925,7 +925,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         barDivider = dv
         bar.addView(dv)
 
-        val titles = arrayOf("SHUTTER", "IRIS", "ISO", "WB", "KELVIN")
+        val titles = arrayOf("SHUTTER", "IRIS", "ISO", "WB", "KELVIN", "FOCUS")
         for (k in chipCodes.indices) {
             val code = chipCodes[k]
             val box = LinearLayout(ctx)
@@ -1088,7 +1088,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     /** Chip della barra: in Ripresa spariscono (resta solo il REC, piu' grande); KELVIN solo con WB in temperatura colore. */
     private fun updateChips() {
         for (code in chipCodes) {
-            val show = !shoot && (code != SonyProps.KELVIN || kelvinShown())
+            val show = !shoot && (code != SonyProps.KELVIN || kelvinShown()) && (code != SonyProps.FOCUS_MODE || props[SonyProps.FOCUS_MODE] != null)
             chipBox[code]?.visibility = if (show) View.VISIBLE else View.GONE
         }
         barDivider?.visibility = if (shoot) View.GONE else View.VISIBLE
@@ -2071,7 +2071,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUpdateDialog(r: Updater.Release) {
         val mb = if (r.size > 0) String.format(Locale.ROOT, " (%.1f MB)", r.size / 1048576.0) else ""
-        val notes = r.notes.trim().take(900)
+        val notes = r.notes.trim().take(1500)
         MaterialAlertDialogBuilder(this)
             .setTitle("Nuova versione disponibile")
             .setMessage("Installata: ${installedName()}\nNuova: ${r.name}$mb" + (if (notes.isNotEmpty()) "\n\n$notes" else ""))

@@ -129,6 +129,7 @@ class SonyCam(
             add(SonyProps.EXP_COMP, 3, listOf(-2000L, -1000L, 0L, 1000L, 2000L))
             add(SonyProps.EXP_MODE, 4, listOf(1L, 2L, 3L, 4L))
             add(SonyProps.METERING, 4, listOf(0x8001L, 0x8002L, 0x8004L))
+            add(SonyProps.FOCUS_MODE, 4, listOf(1L, 2L, 0x8004L))
             add(SonyProps.WB, 4, listOf(2L, 4L, 5L, 6L, SonyProps.WB_KELVIN))
             add(SonyProps.KELVIN, 4, listOf(2800L, 3200L, 4300L, 5000L, 5600L, 6500L))
             out[SonyProps.REC_STATE] = Prop(SonyProps.REC_STATE, 4, 0x80, 1, simState[SonyProps.REC_STATE] ?: 0L, emptyList())
@@ -154,6 +155,7 @@ class SonyCam(
                 simState[SonyProps.ISO] = 800L
                 simState[SonyProps.EXP_MODE] = 1L
                 simState[SonyProps.METERING] = 0x8001L
+                simState[SonyProps.FOCUS_MODE] = 2L
                 simState[SonyProps.WB] = 2L
                 simState[SonyProps.KELVIN] = 5600L
                 simState[SonyProps.EXP_COMP] = 0L
@@ -478,7 +480,7 @@ class SonyCam(
     private val unkCount = HashMap<Int, Int>()
     private val knownCodes: Set<Int> = hashSetOf(
         SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.REC_STATE, SonyProps.REC_BUTTON,
-        SonyProps.EXP_COMP, SonyProps.WB, SonyProps.KELVIN, SonyProps.EXP_MODE, SonyProps.METERING,
+        SonyProps.EXP_COMP, SonyProps.WB, SonyProps.KELVIN, SonyProps.EXP_MODE, SonyProps.METERING, SonyProps.FOCUS_MODE,
         SonyProps.BATTERY_STD, SonyProps.BATTERY, SonyProps.BATTERY_PCT, 0xD221,
         SonyProps.MEDIA_TIME[0], SonyProps.MEDIA_TIME[1], SonyProps.MEDIA_SHOTS[0], SonyProps.MEDIA_SHOTS[1]
     )

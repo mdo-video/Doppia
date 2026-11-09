@@ -28,6 +28,7 @@ object SonyProps {
     const val KELVIN = 0xD20F       // uint16: temperatura colore in K (da verificare nel log)
     const val WB_KELVIN = 0x8012L   // valore di WB "temperatura colore" (da verificare nel log)
     const val EXP_MODE = 0x500E     // 1 M, 2 P, 3 A, 4 S
+    const val FOCUS_MODE = 0x500A   // modo di messa a fuoco (codice standard PTP): 1 = MF, 2 = AF-S, 0x8004 = AF-C (valori Sony da verificare nel log)
     const val METERING = 0x500B
     const val BATTERY_STD = 0x5001  // livello batteria standard PTP (0-100)
     const val BATTERY = 0xD20E      // livello batteria Sony a gradini (solo ripiego)
@@ -269,6 +270,7 @@ object SonyProps {
         }
         WB -> fmtWb(v)
         KELVIN -> "${v}K"
+        FOCUS_MODE -> when (v) { 1L -> "MF"; 2L -> "AF-S"; 0x8004L -> "AF-C"; 0x8005L -> "AF-A"; 0x8006L -> "DMF"; else -> hex(v) }
         else -> hex(v)
     }
 
