@@ -105,7 +105,11 @@ class Wheel(ctx: Context) : HorizontalScrollView(ctx) {
         if (!touching) postDelayed(settleRun, 90L)
     }
 
-    override fun onTouchEvent(e: MotionEvent): Boolean {
+    /**
+     * Segue il dito da dispatchTouchEvent: se il tocco parte su un valore (che e' cliccabile) il primo
+     * ACTION_DOWN non arriva a onTouchEvent, e la ruota si aggancerebbe mentre si sta ancora scorrendo.
+     */
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
         if (wheelMode) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -120,7 +124,7 @@ class Wheel(ctx: Context) : HorizontalScrollView(ctx) {
                 }
             }
         }
-        return super.onTouchEvent(e)
+        return super.dispatchTouchEvent(e)
     }
 
     private fun settleNow() {
