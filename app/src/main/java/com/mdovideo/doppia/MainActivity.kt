@@ -572,6 +572,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val chipVal = HashMap<Int, TextView>()
     private val chipCodes = intArrayOf(SonyProps.SHUTTER, SonyProps.APERTURE, SonyProps.ISO, SonyProps.WB, SonyProps.KELVIN, SonyProps.FOCUS_MODE)
     private val pickerItems = ArrayList<Pair<Long, TextView>>()
+    /** Aggiorna switch AF/MF o slider Kelvin quando la camera cambia valore (null se il selettore e' a elenco). */
+    private var syncPicker: ((Long) -> Unit)? = null
     private var props: Map<Int, Prop> = emptyMap()
     private var pickerCode = 0
     private var recStart = 0L
@@ -1407,28 +1409,145 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         pickerCode = code
         pickerRow.removeAllViews()
         pickerItems.clear()
-        for (v in p.options) {
-            val t = TextView(context)
-            t.text = SonyProps.fmt(code, v)
-            t.textSize = 17f
-            t.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            t.setPadding(dp(14), dp(8), dp(14), dp(8))
-            t.setOnClickListener { onPick?.invoke(p, v) }
-            pickerRow.addView(t)
-            pickerItems.add(v to t)
+        syncPicker = null
+        pickerRow.gravity = Gravity.CENTER_VERTICAL
+        if (code == SonyProps.KELVIN && p.options.size > 8) {
+            buildKelvinSlider(p)
+        } else if (code == SonyProps.FOCUS_MODE && p.options.contains(1L) && p.options.size >= 2) {
+            buildFocusSwitch(p)
+        } else {
+            for (v in p.options) {
+                val t = TextView(context)
+                t.text = SonyProps.fmt(code, v)
+                t.textSize = 17f
+                t.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                t.setPadding(dp(14), dp(8), dp(14), dp(8))
+                t.setOnClickListener { onPick?.invoke(p, v) }
+                pickerRow.addView(t)
+                pickerItems.add(v to t)
+            }
         }
         picker.visibility = View.VISIBLE
         for (c in chipCodes) chipBox[c]?.background = if (c == code) roundBg(0x33FFC107.toInt(), 12, context) else null
         highlight(p.current, true)
     }
 
+    private fun pickerLabel(text: String): TextView = TextView(context).apply {
+        this.text = text
+        textSize = 17f
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        setPadding(dp(10), dp(8), dp(10), dp(8))
+    }
+
+    /** Switch AF / MF: si tocca o si fa scorrere; se la camera ha piu' modi AF (AF-S, AF-C) compaiono accanto per sceglierli. */
+    private fun buildFocusSwitch(p: Prop) {
+        val mf = 1L
+        val afOpts = p.options.filter { it != mf }
+        var lastAf = if (p.current in afOpts) p.current else afOpts.first()
+        var lastUser = 0L
+        var busy = false
+        val left = pickerLabel("AF")
+        val right = pickerLabel("MF")
+        val sw = SwitchCompat(context)
+        val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+        sw.thumbTintList = ColorStateList(states, intArrayOf(Pal.MID, Pal.TEXT))
+        sw.trackTintList = ColorStateList(states, intArrayOf(0x66FFC107.toInt(), 0x55E8EDF3.toInt()))
+        val chips = ArrayList<Pair<Long, TextView>>()
+        fun paint(cur: Long) {
+            val isMf = cur == mf
+            if (!isMf && cur in afOpts) lastAf = cur
+            left.text = if (afOpts.size > 1) "AF" else SonyProps.fmt(SonyProps.FOCUS_MODE, lastAf)
+            left.setTextColor(if (!isMf) Pal.MID else Pal.MUTED)
+            right.setTextColor(if (isMf) Pal.MID else Pal.MUTED)
+            for ((v, c) in chips) c.setTextColor(if (!isMf && v == cur) Pal.MID else Pal.MUTED)
+            busy = true
+            sw.isChecked = isMf
+            busy = false
+        }
+        sw.setOnCheckedChangeListener { _, checked ->
+            if (!busy) {
+                lastUser = SystemClock.elapsedRealtime()
+                onPick?.invoke(p, if (checked) mf else lastAf)
+            }
+        }
+        pickerRow.addView(left)
+        pickerRow.addView(sw)
+        pickerRow.addView(right)
+        if (afOpts.size > 1) {
+            for (v in afOpts) {
+                val c = pickerLabel(SonyProps.fmt(SonyProps.FOCUS_MODE, v))
+                c.setOnClickListener {
+                    lastUser = SystemClock.elapsedRealtime()
+                    lastAf = v
+                    onPick?.invoke(p, v)
+                }
+                pickerRow.addView(c)
+                chips.add(v to c)
+            }
+        }
+        syncPicker = { cur -> if (SystemClock.elapsedRealtime() - lastUser > 1000L) paint(cur) }
+        paint(p.current)
+    }
+
+    /** Slider dei Kelvin da scorrere col dito: manda il valore durante lo scorrimento (al massimo ogni 0,3 s) e alla fine. */
+    private fun buildKelvinSlider(p: Prop) {
+        val opts = p.options.sorted()
+        fun idxOf(cur: Long): Int = opts.indices.minByOrNull { Math.abs(opts[it] - cur) } ?: 0
+        val label = pickerLabel(SonyProps.fmt(SonyProps.KELVIN, p.current))
+        label.minWidth = dp(96)
+        label.gravity = Gravity.END
+        val seek = SeekBar(context)
+        seek.max = opts.size - 1
+        seek.progress = idxOf(p.current)
+        seek.progressTintList = ColorStateList.valueOf(Pal.MID)
+        seek.thumbTintList = ColorStateList.valueOf(Pal.MID)
+        var dragging = false
+        var lastSent = -1L
+        var lastAt = 0L
+        var lastUser = 0L
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                label.text = SonyProps.fmt(SonyProps.KELVIN, opts[v])
+                if (!fromUser) return
+                val now = SystemClock.elapsedRealtime()
+                lastUser = now
+                if (now - lastAt >= 300L && opts[v] != lastSent) {
+                    lastAt = now
+                    lastSent = opts[v]
+                    onPick?.invoke(p, opts[v])
+                }
+            }
+            override fun onStartTrackingTouch(s: SeekBar) {
+                dragging = true
+                s.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            override fun onStopTrackingTouch(s: SeekBar) {
+                dragging = false
+                lastUser = SystemClock.elapsedRealtime()
+                val v = opts[s.progress]
+                if (v != lastSent) {
+                    lastSent = v
+                    onPick?.invoke(p, v)
+                }
+            }
+        })
+        val w = (width - dp(150)).coerceIn(dp(220), dp(520))
+        pickerRow.addView(seek, LinearLayout.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT))
+        pickerRow.addView(label)
+        syncPicker = { cur ->
+            if (!dragging && SystemClock.elapsedRealtime() - lastUser > 1500L) seek.progress = idxOf(cur)
+        }
+    }
+
     private fun closePicker() {
         pickerCode = 0
+        syncPicker = null
         picker.visibility = View.GONE
         for (c in chipCodes) chipBox[c]?.background = null
     }
 
     private fun highlight(cur: Long, scroll: Boolean) {
+        syncPicker?.invoke(cur)
         var curView: TextView? = null
         for ((v, t) in pickerItems) {
             val on = v == cur

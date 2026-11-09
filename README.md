@@ -52,6 +52,7 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - L'aggiornamento non parte se una camera sta registrando.
 
 ## Novita' 1.17
+- **Switch AF/MF e slider Kelvin**: FOCUS ora e' un interruttore da toccare o far scorrere; i Kelvin si scelgono trascinando uno slider invece di scorrere un elenco lungo.
 - **Messa a fuoco AF/MF**: nuovo valore FOCUS nella barra di ogni camera (AF-S, AF-C, MF); compare solo se la camera lo espone. Con Sync accesa si cambia su tutte.
 - **Pulsante Novita'** in Impostazioni > Aggiornamenti: mostra le novita' di tutte le versioni, lette dal README a ogni build.
 - **Set WB piu' semplice**: ora e' in 3 passi (scegli con cosa misurare, inquadra una carta grigia o bianca, imposta le camere). Il pulsante mostra il valore ("Imposta le camere a 5200 K") e i messaggi dicono cosa fare, ad esempio quando la camera e' su Auto.
