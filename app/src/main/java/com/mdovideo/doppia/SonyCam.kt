@@ -43,34 +43,6 @@ class SonyCam(
         }
     }
 
-    private val focusPending = java.util.concurrent.atomic.AtomicInteger(0)
-    private val focusQueued = java.util.concurrent.atomic.AtomicBoolean(false)
-    @Volatile private var focusLogAt = 0L
-
-    /** Muove il fuoco manuale: steps > 0 verso il lontano, < 0 verso il vicino (max 7 per volta). I passi ravvicinati si sommano. */
-    fun focusDrive(steps: Int) {
-        if (steps == 0) return
-        if (sim) { say("TEST fuoco ${if (steps > 0) "lontano" else "vicino"} ${Math.abs(steps)}"); return }
-        focusPending.addAndGet(steps)
-        if (!focusQueued.compareAndSet(false, true)) return
-        cmds.add { c ->
-            focusQueued.set(false)
-            var n = focusPending.getAndSet(0)
-            var guard = 0
-            while (n != 0 && guard++ < 6) {
-                val s = n.coerceIn(-7, 7)
-                n -= s
-                val r = c.transaction(0x9207, intArrayOf(SonyProps.FOCUS_DRIVE), SonyProps.toBytes((s and 0xFFFF).toLong(), 2))
-                val now = System.currentTimeMillis()
-                if (!r.ok || now - focusLogAt > 1500L) {
-                    focusLogAt = now
-                    say("Fuoco ${if (s > 0) "lontano" else "vicino"} ${Math.abs(s)} (${hex(SonyProps.FOCUS_DRIVE)} <- $s): ${hex(r.code)}")
-                }
-            }
-            c.transaction(0x9207, intArrayOf(SonyProps.FOCUS_DRIVE), SonyProps.toBytes(0L, 2))
-        }
-    }
-
     companion object {
         /** Metodo REC che ha funzionato, per indirizzo (ricordato finche' l'app e' aperta). */
         val learnedRecipe = java.util.concurrent.ConcurrentHashMap<String, Int>()
