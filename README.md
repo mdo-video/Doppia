@@ -52,8 +52,9 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - L'aggiornamento non parte se una camera sta registrando.
 
 ## Novita' 1.17
+- **Pulsante Novita'** in Impostazioni > Aggiornamenti: mostra le novita' di tutte le versioni, lette dal README a ogni build.
 - **Set WB piu' semplice**: ora e' in 3 passi (scegli con cosa misurare, inquadra una carta grigia o bianca, imposta le camere). Il pulsante mostra il valore ("Imposta le camere a 5200 K") e i messaggi dicono cosa fare, ad esempio quando la camera e' su Auto.
-- **Dominante colore e confronto**: sopra l'istogramma di ogni camera "verde +3, caldo +2" (media dell'immagine); sulle altre camere "vs A: +0.4 EV, +3 verde", la differenza dalla A. Si spegne in Impostazioni > Monitor.
+- **Colore delle camere**: a parole se l'immagine tira al verde/magenta o al caldo/freddo; sulle altre camere confronto di luce e colore con la prima, col consiglio di usare Set WB. Si spegne in Impostazioni > Monitor.
 - **PIN della modalita' test con tastierino a schermo**: 4 pallini, tasti da 0 a 9 e cancella. Si conferma da solo alla quarta cifra; con un PIN sbagliato resta aperto e si puo' riprovare. Annulla (o un tocco fuori) chiude senza accendere la modalita' test.
 
 ## Novita' 1.16

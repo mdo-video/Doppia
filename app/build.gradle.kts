@@ -8,6 +8,29 @@ val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
 // Repository da cui l'app cerca gli aggiornamenti (su GitHub lo prende da solo).
 val updateRepo = System.getenv("GITHUB_REPOSITORY") ?: "mdo-video/Doppia"
 
+// Elenco delle novita': a ogni compilazione le sezioni "## Novita' ..." del README diventano un file
+// dentro l'app, cosi' il pulsante Novita' segue sempre il README senza doverlo aggiornare a mano.
+val changelogDir = layout.buildDirectory.get().asFile.resolve("generated/changelog")
+val genChangelog by tasks.registering {
+    val readme = rootProject.file("README.md")
+    val out = changelogDir.resolve("changelog.txt")
+    inputs.files(readme)
+    outputs.file(out)
+    doLast {
+        out.parentFile.mkdirs()
+        val sb = StringBuilder()
+        var on = false
+        if (readme.exists()) {
+            for (line in readme.readLines()) {
+                if (line.startsWith("## ")) on = line.startsWith("## Novita'")
+                if (on) sb.append(line).append('\n')
+            }
+        }
+        out.writeText(sb.toString())
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(genChangelog) }
+
 android {
     namespace = "com.mdovideo.doppia"
     compileSdk = 34
@@ -23,6 +46,12 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDir(changelogDir)
+        }
     }
 
     // Chiave di firma fissa: stessa firma a ogni build, gli aggiornamenti si installano sopra.

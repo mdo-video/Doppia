@@ -150,6 +150,13 @@ class RecButton(ctx: Context) : View(ctx) {
     }
 }
 
+/** Confronto con la prima camera: testo da mostrare e se luce e colore sono uguali. */
+class CastCmp(val text: String, val same: Boolean)
+
+/** "un po' ", "" o "molto " a seconda di quanto e' grande lo scarto (x >= soglia minima gia' verificato). */
+private fun lvl3(x: Float, medium: Float, strong: Float): String =
+    if (x < medium) "un po' " else if (x < strong) "" else "molto "
+
 /** Istogramma della luminanza (64 barre). */
 class HistView(ctx: Context) : View(ctx) {
     var bins: IntArray? = null
@@ -889,14 +896,15 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
 
         // Dominante colore e confronto con la camera A, sopra l'istogramma
         castV.visibility = View.GONE
-        castV.textSize = 11f
-        castV.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        castV.textSize = 13f
+        castV.typeface = Typeface.DEFAULT_BOLD
         castV.setTextColor(Pal.TEXT)
-        castV.background = roundBg(0x990B0F15.toInt(), 8, ctx)
-        castV.setPadding(dp(7), dp(4), dp(7), dp(4))
+        castV.maxWidth = dp(250)
+        castV.background = roundBg(0xCC0B0F15.toInt(), 12, ctx)
+        castV.setPadding(dp(10), dp(6), dp(10), dp(6))
         val cpLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         cpLp.gravity = Gravity.BOTTOM or Gravity.START
-        cpLp.setMargins(dp(12), 0, 0, dp(12 + 60 + 6))
+        cpLp.setMargins(dp(12), 0, dp(12), dp(78))
         addView(castV, cpLp)
 
         // Barra monitor in basso: REC | otturatore diaframma ISO | esposimetro
@@ -1164,6 +1172,10 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         val b = ovlPanel.layoutParams as LayoutParams
         b.gravity = g
         ovlPanel.layoutParams = b
+        // il riquadro dei colori sta dal lato interno, dove non ci sono i pulsanti
+        val c = castV.layoutParams as LayoutParams
+        c.gravity = Gravity.BOTTOM or (if (right) Gravity.START else Gravity.END)
+        castV.layoutParams = c
     }
 
     /** Ultimo fotogramma ricevuto (senza strumenti sopra), per lo screenshot. */
@@ -1188,7 +1200,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         overlayImg.visibility = if (b != null && hasFrame) View.VISIBLE else View.GONE
     }
 
-    fun setFrame(b: Bitmap, ms: Int, a: Analysis?, cmp: String? = null) {
+    fun setFrame(b: Bitmap, ms: Int, a: Analysis?, cmp: CastCmp? = null) {
         img.setImageBitmap(b)
         lastFrame = b
         hasFrame = true
@@ -1225,7 +1237,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         histV.visibility = if (a?.hist != null && !shoot) View.VISIBLE else View.GONE
 
         if (a != null && a.hasColor && Monitor.cast && !shoot) {
-            castV.text = castText(a.tint, a.warm) + (if (cmp != null) "\n" + cmp else "")
+            val sb = android.text.SpannableStringBuilder(castLine(a.tint, a.warm))
+            if (cmp != null) {
+                val st = sb.length + 1
+                sb.append('\n').append(cmp.text)
+                sb.setSpan(ForegroundColorSpan(if (cmp.same) Pal.OK else Pal.MID), st, sb.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            castV.text = sb
             castV.visibility = View.VISIBLE
         } else {
             castV.visibility = View.GONE
@@ -1240,13 +1258,12 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         }
     }
 
-    /** Testo della dominante colore di questa camera (media dell'immagine, non una misura con carta grigia). */
-    private fun castText(tint: Float, warm: Float): String {
-        val t = Math.round(tint)
-        val w = Math.round(warm)
-        val ts = if (Math.abs(tint) < 1.5f) "tinta neutra" else if (tint > 0) "verde +$t" else "magenta ${-t}"
-        val ws = if (Math.abs(warm) < 1.5f) "neutro" else if (warm > 0) "caldo +$w" else "freddo ${-w}"
-        return "$ts · $ws"
+    /** Colore dell'immagine a parole (media dell'immagine, non una misura con carta grigia). */
+    private fun castLine(tint: Float, warm: Float): String {
+        val parts = ArrayList<String>()
+        if (Math.abs(tint) >= 3f) parts.add(lvl3(Math.abs(tint), 8f, 16f) + "al " + (if (tint > 0) "verde" else "magenta"))
+        if (Math.abs(warm) >= 8f) parts.add(lvl3(Math.abs(warm), 20f, 40f) + "al " + (if (warm > 0) "caldo" else "freddo"))
+        return "Colore: " + (if (parts.isEmpty()) "neutro" else "tira " + parts.joinToString(" e "))
     }
 
     /** Secondi di registrazione (contati dall'app da quando rileva il REC), -1 se non registra. */
@@ -2001,6 +2018,55 @@ class MainActivity : AppCompatActivity() {
                 if (manual) runOnUiThread { Toast.makeText(this, "Aggiornamenti: $msg", Toast.LENGTH_LONG).show() }
             }
         }.start()
+    }
+
+    /** Novita' di tutte le versioni, dalla piu' recente: il testo viene dal README (vedi app/build.gradle.kts). */
+    private fun changelogText(): String {
+        val raw = try {
+            assets.open("changelog.txt").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (_: Exception) {
+            return ""
+        }
+        val secs = ArrayList<Pair<String, List<String>>>()
+        var title = ""
+        var cur = ArrayList<String>()
+        fun flush() {
+            if (title.isNotEmpty()) secs.add(Pair(title, cur))
+            cur = ArrayList()
+        }
+        for (l in raw.lines()) {
+            if (l.startsWith("## ")) {
+                flush()
+                title = l.removePrefix("## Novita'").trim()
+            } else if (l.isNotBlank() && title.isNotEmpty()) {
+                cur.add(l)
+            }
+        }
+        flush()
+        fun key(s: String): Long {
+            val p = s.split('.')
+            return (p.getOrNull(0)?.toLongOrNull() ?: 0L) * 1000L + (p.getOrNull(1)?.toLongOrNull() ?: 0L)
+        }
+        secs.sortByDescending { key(it.first) }
+        val sb = StringBuilder()
+        for ((t, ls) in secs) {
+            sb.append("Versione ").append(t).append('\n')
+            for (l in ls) {
+                val s = l.replace("**", "")
+                sb.append(if (s.startsWith("- ")) "• " + s.substring(2) else s).append('\n')
+            }
+            sb.append('\n')
+        }
+        return sb.toString().trim()
+    }
+
+    private fun showChangelog() {
+        val txt = changelogText().ifEmpty { "Nessuna novità disponibile in questa versione." }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Novità (installata: ${installedName()})")
+            .setMessage(txt)
+            .setPositiveButton("Chiudi", null)
+            .show()
     }
 
     private fun showUpdateDialog(r: Updater.Release) {
@@ -3251,6 +3317,9 @@ class MainActivity : AppCompatActivity() {
         val ulp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         ulp.topMargin = dp(6)
         col.addView(updCheck, ulp)
+        val newsBtn = pillButton("Novità di questa versione")
+        newsBtn.setOnClickListener { showChangelog() }
+        col.addView(newsBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
 
         col = newPage("Test e diagnostica", "Camere simulate, log, copia diagnostica")
         col.addView(sectionTitle("Modalità test"))
@@ -3738,10 +3807,10 @@ class MainActivity : AppCompatActivity() {
     private val cmpAt = LongArray(MAX_CAMS)
 
     /** Registra la lettura della camera i; per le camere dopo la A ritorna il confronto con la A (o null). */
-    private fun compareText(i: Int, a: Analysis?): String? {
+    private fun compareText(i: Int, a: Analysis?): CastCmp? {
         if (a == null || !a.hasColor || !Monitor.cast) return null
         val now = android.os.SystemClock.elapsedRealtime()
-        var res: String? = null
+        var res: CastCmp? = null
         synchronized(cmpLock) {
             val fresh = now - cmpAt[i] < 3000
             cmpEv[i] = if (fresh) cmpEv[i] * 0.8f + a.ev * 0.2f else a.ev
@@ -3752,10 +3821,25 @@ class MainActivity : AppCompatActivity() {
                 val dEv = cmpEv[i] - cmpEv[0]
                 val dT = cmpTint[i] - cmpTint[0]
                 val dW = cmpWarm[i] - cmpWarm[0]
-                val e = if (Math.abs(dEv) < 0.15f) "luce uguale" else String.format(java.util.Locale.ROOT, "%+.1f EV", dEv)
-                val t = if (Math.abs(dT) < 1.5f) "tinta uguale" else if (dT > 0) "+${Math.round(dT)} verde" else "${-Math.round(dT)} magenta"
-                val w = if (Math.abs(dW) < 1.5f) "calore uguale" else if (dW > 0) "+${Math.round(dW)} caldo" else "${-Math.round(dW)} freddo"
-                res = "vs ${camName(0)}: $e · $t · $w"
+                val name = camName(0)
+                val luce: String? = if (Math.abs(dEv) < 0.2f) null else
+                    "Luce: " + (if (dEv < 0) "più scura" else "più chiara") + " di $name (" +
+                        String.format(java.util.Locale.ROOT, "%.1f", Math.abs(dEv)) + " stop)"
+                val parts = ArrayList<String>()
+                if (Math.abs(dT) >= 3f) parts.add(lvl3(Math.abs(dT), 8f, 16f) + "più " + (if (dT > 0) "verde" else "magenta"))
+                if (Math.abs(dW) >= 8f) parts.add(lvl3(Math.abs(dW), 20f, 40f) + "più " + (if (dW > 0) "caldo" else "freddo"))
+                val colore: String? = if (parts.isEmpty()) null else "Colore: " + parts.joinToString(" e ") + " di $name"
+                res = if (luce == null && colore == null) {
+                    CastCmp("Luce e colore uguali a $name", true)
+                } else {
+                    val lines = ArrayList<String>()
+                    if (luce != null) lines.add(luce)
+                    if (colore != null) {
+                        lines.add(colore)
+                        lines.add("Per allinearli usa Set WB")
+                    }
+                    CastCmp(lines.joinToString("\n"), false)
+                }
             }
         }
         return res
