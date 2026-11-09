@@ -1443,6 +1443,22 @@ class MainActivity : AppCompatActivity() {
     private var simOn = false
     private val tiles = ArrayList<Tile>()
     private var addBtn: TextView? = null
+    /** Con 3 camere in orizzontale la 4a cella della griglia 2 x 2 e' un segnaposto "Aggiungi camera". */
+    private val addSlot: TextView by lazy {
+        val t = TextView(this)
+        t.text = "+   Aggiungi camera"
+        t.textSize = 18f
+        t.gravity = Gravity.CENTER
+        t.setTextColor(Pal.MUTED)
+        val g = GradientDrawable()
+        g.setColor(Color.TRANSPARENT)
+        g.cornerRadius = dp(24).toFloat()
+        g.setStroke(dp(2), Pal.LINE, dp(10).toFloat(), dp(7).toFloat())
+        t.background = g
+        t.setOnClickListener { addCamera() }
+        Springs.pressable(t, 0.98f)
+        t
+    }
     private lateinit var stageView: FrameLayout
     private lateinit var status: TextView
     private lateinit var logClose: MaterialButton
@@ -2852,6 +2868,7 @@ class MainActivity : AppCompatActivity() {
         val port = isPortrait()
         val n = tiles.size
         for (t in tiles) (t.parent as? ViewGroup)?.removeView(t)
+        (addSlot.parent as? ViewGroup)?.removeView(addSlot)
         tilesRow.removeAllViews()
         val grid = !port && n > 2
         tilesRow.orientation = if (grid || port) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
@@ -2876,10 +2893,16 @@ class MainActivity : AppCompatActivity() {
                 line.addView(tiles[idx], lp)
                 idx++
             }
+            // 3 camere: l'ultima riga ha una sola camera, la cella accanto resta occupata dal segnaposto
+            if (grid && idx >= n && n % 2 == 1 && n < MAX_CAMS) {
+                val slp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                slp.leftMargin = dp(10)
+                line.addView(addSlot, slp)
+            }
         }
         for (i in tiles.indices) tiles[i].setSide(i % 2 == 1)
         tilesRow.requestLayout()
-        positionAdd()
+        updateAddBtn()
     }
 
     /** Mette il "+" sulla linea che separa la prima dalla seconda anteprima. */
@@ -2911,7 +2934,13 @@ class MainActivity : AppCompatActivity() {
     /** Il "+" si vede solo in Setup, con tutte le anteprime visibili e se c'e' ancora posto. */
     private fun updateAddBtn() {
         val b = addBtn ?: return
-        b.visibility = if (!shootMode && solo == -1 && tiles.size < MAX_CAMS) View.VISIBLE else View.GONE
+        val slotThere = addSlot.parent != null
+        addSlot.visibility = if (!slotThere) View.GONE
+            else if (solo != -1) View.GONE
+            else if (shootMode) View.INVISIBLE
+            else View.VISIBLE
+        // con il segnaposto in griglia il "+" fluttuante e' ridondante
+        b.visibility = if (!shootMode && solo == -1 && tiles.size < MAX_CAMS && !slotThere) View.VISIBLE else View.GONE
         positionAdd()
     }
 
