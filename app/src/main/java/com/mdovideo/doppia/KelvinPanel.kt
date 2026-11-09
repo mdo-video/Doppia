@@ -172,8 +172,17 @@ class KelvinPanel(private val host: KelvinHost) {
             setOnClickListener { dlg.dismiss() }
         })
         root.addView(head)
+        root.addView(TextView(act).apply {
+            text = "Bilanciamento del bianco: misura il colore della luce e lo imposta sulle camere."
+            textSize = 13f
+            setTextColor(Pal.MUTED)
+            setPadding(0, dp(2), 0, 0)
+        })
 
-        // sorgente
+        // passo 1: sorgente
+        root.addView(stepLabel("1  Scegli con cosa misurare"), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(14) })
         chipsRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         val hs = HorizontalScrollView(act).apply {
             isHorizontalScrollBarEnabled = false
@@ -181,9 +190,12 @@ class KelvinPanel(private val host: KelvinHost) {
         }
         root.addView(hs, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(10); bottomMargin = dp(10) })
+        ).apply { topMargin = dp(8); bottomMargin = dp(12) })
 
-        // corpo: anteprima + risultato
+        // passo 2: anteprima + risultato
+        root.addView(stepLabel("2  Inquadra una carta grigia o bianca"), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(8) })
         body = LinearLayout(act)
         left = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         right = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
@@ -223,7 +235,7 @@ class KelvinPanel(private val host: KelvinHost) {
             setTextColor(Pal.TEXT)
             setPadding(dp(12), dp(5), dp(12), dp(5))
             background = roundBg(Pal.LINE, 20, act)
-            text = "In attesa…"
+            text = "In attesa della misura…"
         }
         right.addView(pill, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -291,23 +303,32 @@ class KelvinPanel(private val host: KelvinHost) {
             bar.markerColor = kColor(v)
         }
 
-        // pulsanti
+        // passo 3: pulsanti
+        root.addView(stepLabel("3  Quando vedi il numero, imposta le camere"), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(16) })
         val buttons = FlowRow(act, dp(8))
-        holdBtn = button("Blocca", Pal.LINE, Pal.TEXT)
+        holdBtn = button("Blocca il valore", Pal.LINE, Pal.TEXT)
         holdBtn.setOnClickListener {
             hold = !hold
-            holdBtn.text = if (hold) "Sblocca" else "Blocca"
+            holdBtn.text = if (hold) "Sblocca il valore" else "Blocca il valore"
             updatePill()
         }
-        setAllBtn = button("Imposta camere", Pal.MID, Pal.BG)
+        setAllBtn = button("Imposta le camere", Pal.MID, Pal.BG)
         setAllBtn.setOnClickListener {
-            if (shownK > 0) host.applyKelvin(shownK, (0 until host.camCount).filter { host.isLive(it) })
+            if (shownK > 0) {
+                host.applyKelvin(shownK, (0 until host.camCount).filter { host.isLive(it) })
+                pill.text = "Impostato su $shownK K"
+            }
         }
         setOneBtn = button("Solo camera", Pal.LINE, Pal.TEXT)
         setOneBtn.setOnClickListener {
-            if (shownK > 0 && isCam(source)) host.applyKelvin(shownK, listOf(source))
+            if (shownK > 0 && isCam(source)) {
+                host.applyKelvin(shownK, listOf(source))
+                pill.text = "Impostato su $shownK K (solo ${host.camLabel(source)})"
+            }
         }
-        modeBtn = button("Passa a Kelvin 5600 K", Pal.LINE, Pal.TEXT)
+        modeBtn = button("Metti la camera in WB Kelvin", Pal.LINE, Pal.TEXT)
         modeBtn.setOnClickListener {
             if (isCam(source)) host.applyKelvin(5600, listOf(source))
         }
@@ -317,7 +338,7 @@ class KelvinPanel(private val host: KelvinHost) {
         buttons.addView(modeBtn)
         root.addView(buttons, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(12) })
+        ).apply { topMargin = dp(8) })
 
         dlg.setContentView(ScrollView(act).apply { addView(root) })
         dlg.window?.setBackgroundDrawable(roundBg(Pal.SURFACE_HIGH, 28, act))
@@ -386,6 +407,13 @@ class KelvinPanel(private val host: KelvinHost) {
         texture.setTransform(matrix)
     }
 
+    private fun stepLabel(text: String): TextView = TextView(act).apply {
+        this.text = text
+        textSize = 14f
+        setTextColor(Pal.MID)
+        typeface = Typeface.DEFAULT_BOLD
+    }
+
     private fun button(label: String, bg: Int, fg: Int): MaterialButton = MaterialButton(act).apply {
         text = label
         isAllCaps = false
@@ -408,7 +436,7 @@ class KelvinPanel(private val host: KelvinHost) {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { marginEnd = dp(8) })
         }
-        chipsRow.addView(chip("Camera tablet", source == TABLET, true) { select(TABLET) })
+        chipsRow.addView(chip("Tablet", source == TABLET, true) { select(TABLET) })
     }
 
     private fun chip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit): TextView =
@@ -431,18 +459,19 @@ class KelvinPanel(private val host: KelvinHost) {
         gotReading = false
         hold = false
         shownK = 0
-        holdBtn.text = "Blocca"
+        holdBtn.text = "Blocca il valore"
         kelvinText.text = "--"
         kelvinText.setTextColor(Pal.TEXT)
         bar.showMarker = false
         descText.text = "In attesa della misura"
         descText.setTextColor(Pal.MUTED)
         infoText.text = ""
+        setAllBtn.text = "Imposta le camere"
         setAllBtn.isEnabled = false
         setAllBtn.alpha = 0.4f
         setOneBtn.isEnabled = false
         setOneBtn.alpha = 0.4f
-        setOneBtn.visibility = if (isCam(s)) View.VISIBLE else View.GONE
+        setOneBtn.visibility = if (isCam(s) && host.camCount > 1) View.VISIBLE else View.GONE
         if (isCam(s)) setOneBtn.text = "Solo ${host.camLabel(s)}"
         modeBtn.visibility = View.GONE
         rebuildChips()
@@ -452,14 +481,14 @@ class KelvinPanel(private val host: KelvinHost) {
             image.visibility = View.INVISIBLE
             box.visibility = View.INVISIBLE
             texture.visibility = View.VISIBLE
-            hint.text = "Inquadra con il tablet una superficie bianca o grigia neutra che riempia l'inquadratura, illuminata dalla luce da misurare."
+            hint.text = "Inquadra con il tablet una superficie bianca o grigia che riempia tutta l'immagine, sotto la luce che vuoi misurare. Il numero si aggiorna da solo."
             if (texture.isAvailable) openTablet()
         } else {
             texture.visibility = View.INVISIBLE
             image.visibility = View.VISIBLE
             box.visibility = View.VISIBLE
-            hint.text = "Inquadra con la camera una carta grigia o bianca che riempia il riquadro al centro. " +
-                "Il WB della camera deve essere in Kelvin o su un preset."
+            hint.text = "Metti una carta grigia o bianca nel riquadro al centro, sotto la luce della scena. " +
+                "Il numero si aggiorna da solo."
             main.removeCallbacks(tick)
             main.post(tick)
         }
@@ -473,7 +502,7 @@ class KelvinPanel(private val host: KelvinHost) {
     private fun updatePill() {
         pill.text = when {
             hold -> "Valore bloccato"
-            !gotReading -> "In attesa…"
+            !gotReading -> "In attesa della misura…"
             approx -> "Stima approssimata"
             else -> "Misura in tempo reale"
         }
@@ -504,6 +533,7 @@ class KelvinPanel(private val host: KelvinHost) {
         }
         descText.text = describe(shownK)
         descText.setTextColor(kColor(target))
+        setAllBtn.text = "Imposta le camere a $shownK K"
     }
 
     private fun status(text: String) {
@@ -536,7 +566,7 @@ class KelvinPanel(private val host: KelvinHost) {
         try {
             val bmp = host.frame(i)
             if (!host.isLive(i) || bmp == null) {
-                status("In attesa del live view di ${host.camLabel(i)}…")
+                status("${host.camLabel(i)} non è in live view: collegala per misurare")
                 return
             }
             image.setImageBitmap(bmp)
@@ -546,7 +576,7 @@ class KelvinPanel(private val host: KelvinHost) {
             val k0 = host.wbKelvin(i)
             if (k0 == null) {
                 modeBtn.visibility = View.VISIBLE
-                status("Metti il WB della camera in Kelvin o su un preset per misurare")
+                status("Il WB della camera è su Auto: tocca \"Metti la camera in WB Kelvin\" per poter misurare")
                 return
             }
             modeBtn.visibility = View.GONE
@@ -595,7 +625,7 @@ class KelvinPanel(private val host: KelvinHost) {
                 x < -0.04 -> "tende al freddo"
                 else -> "neutra"
             }
-            pushReading(k, "WB camera: $k0 K\nCarta: $tint (${"%.2f".format(x)})")
+            pushReading(k, "La camera è ora su $k0 K\nLa carta appare: $tint")
         } catch (_: Throwable) {
         }
     }

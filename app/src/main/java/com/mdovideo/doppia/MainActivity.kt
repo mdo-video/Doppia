@@ -2005,7 +2005,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUpdateDialog(r: Updater.Release) {
         val mb = if (r.size > 0) String.format(Locale.ROOT, " (%.1f MB)", r.size / 1048576.0) else ""
-        val notes = r.notes.trim().take(500)
+        val notes = r.notes.trim().take(900)
         MaterialAlertDialogBuilder(this)
             .setTitle("Nuova versione disponibile")
             .setMessage("Installata: ${installedName()}\nNuova: ${r.name}$mb" + (if (notes.isNotEmpty()) "\n\n$notes" else ""))
