@@ -56,6 +56,7 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Fila piu' corta**: la ruota e' larga al massimo 300 dp e sta al centro, non piu' per tutta la larghezza. I valori ai bordi (come **AUTO** dell'ISO) arrivano sempre al centro.
 - **Funziona anche a tutto schermo**: lo slider dei Kelvin stava dentro a una fila scorrevole che si prendeva il tocco; ora la ruota e' lei stessa lo scorrimento.
 - Lo switch **AF/MF** resta com'e'.
+- **Fuoco manuale da remoto (da provare)**: con la camera in MF, accanto allo switch compare una ruota **VICINO / LONTANO**: scorri il dito a destra per allontanare il fuoco, a sinistra per avvicinarlo. Il tasto **×1 / ×3 / ×7** cambia quanto si muove per ogni scatto. Il codice Sony usato (0xD2D2) e' da verificare nel log: se la camera non risponde, il log dice cosa ha risposto.
 
 ## Novita' 1.17
 - **Switch AF/MF e slider Kelvin**: FOCUS ora e' un interruttore da toccare o far scorrere; i Kelvin si scelgono trascinando uno slider invece di scorrere un elenco lungo.

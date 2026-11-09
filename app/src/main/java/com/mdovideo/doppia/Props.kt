@@ -22,6 +22,7 @@ object SonyProps {
     const val APERTURE = 0x5007     // uint16: f-number x 100
     const val ISO = 0xD21E          // uint32: 0x00FFFFFF = AUTO, byte alto = flag riduzione rumore
     const val REC_STATE = 0xD21D    // stato registrazione filmato: 0 = fermo
+    const val FOCUS_DRIVE = 0xD2D2  // fuoco manuale vicino/lontano (comando di controllo, non sta nella tabella): da -7 (vicino) a +7 (lontano), 0 = fermo. Da verificare nel log
     const val REC_BUTTON = 0xD2C8   // pulsante REC: 2 = giu', 1 = su
     const val EXP_COMP = 0x5010     // int16: EV x 1000
     const val WB = 0x5005

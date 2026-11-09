@@ -686,6 +686,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     }
     var onConnect: (() -> Unit)? = null
     var onPick: ((Prop, Long) -> Unit)? = null
+    /** Fuoco manuale: passi verso il lontano (+) o il vicino (-). */
+    var onFocusDrive: ((Int) -> Unit)? = null
+    private var focusSpeed = 1
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -1457,8 +1460,17 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         sw.thumbTintList = ColorStateList(states, intArrayOf(Pal.MID, Pal.TEXT))
         sw.trackTintList = ColorStateList(states, intArrayOf(0x66FFC107.toInt(), 0x55E8EDF3.toInt()))
         val chips = ArrayList<Pair<Long, TextView>>()
+        val dial = FocusDial(context)
+        dial.onSteps = { n -> onFocusDrive?.invoke(n * focusSpeed) }
+        val speed = pickerLabel("×$focusSpeed")
+        speed.setOnClickListener {
+            focusSpeed = when (focusSpeed) { 1 -> 3; 3 -> 7; else -> 1 }
+            speed.text = "×$focusSpeed"
+        }
         fun paint(cur: Long) {
             val isMf = cur == mf
+            dial.visibility = if (isMf) View.VISIBLE else View.GONE
+            speed.visibility = if (isMf) View.VISIBLE else View.GONE
             if (!isMf && cur in afOpts) lastAf = cur
             left.text = if (afOpts.size > 1) "AF" else SonyProps.fmt(SonyProps.FOCUS_MODE, lastAf)
             left.setTextColor(if (!isMf) Pal.MID else Pal.MUTED)
@@ -1489,6 +1501,10 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
                 chips.add(v to c)
             }
         }
+        val dialLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        dialLp.leftMargin = dp(10)
+        pickerRow.addView(dial, dialLp)
+        pickerRow.addView(speed)
         syncPicker = { cur -> if (SystemClock.elapsedRealtime() - lastUser > 1000L) paint(cur) }
         paint(p.current)
     }
@@ -3045,6 +3061,7 @@ class MainActivity : AppCompatActivity() {
         t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; Monitor.save(prefs); refreshToolButtons() }
         t.onTogglePeak = { Monitor.peaking = !Monitor.peaking; Monitor.save(prefs); refreshToolButtons() }
         t.onPick = { p, v -> applyProp(i, p, v) }
+        t.onFocusDrive = { n -> cams[i]?.focusDrive(n) }
         Springs.pressable(t, 0.985f)
         t.setOnClickListener {
             solo = if (solo == i) -1 else i

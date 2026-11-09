@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.MotionEvent
+import android.view.HapticFeedbackConstants
+import android.view.View
 import android.view.ViewGroup
 import android.widget.HorizontalScrollView
 
@@ -147,5 +149,74 @@ class Wheel(ctx: Context) : HorizontalScrollView(ctx) {
             }
         }
         super.dispatchDraw(canvas)
+    }
+}
+
+/**
+ * Ruota del fuoco manuale: si fa scorrere il dito, a destra = piu' lontano, a sinistra = piu' vicino.
+ * Ogni scatto della ruota manda un passo alla camera.
+ */
+class FocusDial(ctx: Context) : View(ctx) {
+
+    /** Passi da mandare: positivi = lontano, negativi = vicino. */
+    var onSteps: ((Int) -> Unit)? = null
+
+    private val gap = dp(16).toFloat()
+    private var off = 0f
+    private var acc = 0f
+    private var lastX = 0f
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(0x55, 0xE8, 0xED, 0xF3) }
+    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = dp(2).toFloat(); strokeCap = Paint.Cap.ROUND }
+    private val mid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Pal.MID; strokeWidth = dp(3).toFloat(); strokeCap = Paint.Cap.ROUND }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Pal.MUTED; textSize = dp(10).toFloat(); typeface = android.graphics.Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER }
+    private val rect = RectF()
+
+    override fun onMeasure(w: Int, h: Int) {
+        setMeasuredDimension(dp(200), dp(44))
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastX = e.x
+                acc = 0f
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = e.x - lastX
+                lastX = e.x
+                off = ((off + dx) % gap + gap) % gap
+                acc += dx
+                val n = (acc / gap).toInt()
+                if (n != 0) {
+                    acc -= n * gap
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    onSteps?.invoke(n)
+                }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> return true
+        }
+        return super.onTouchEvent(e)
+    }
+
+    override fun onDraw(c: Canvas) {
+        val cy = height / 2f
+        rect.set(0f, dp(2).toFloat(), width.toFloat(), height - dp(2).toFloat())
+        c.drawRoundRect(rect, dp(12).toFloat(), dp(12).toFloat(), bg)
+        val cx = width / 2f
+        var x = off
+        while (x < width) {
+            val d = Math.abs(x - cx) / cx
+            val a = (255 * (1f - d * d)).toInt().coerceIn(30, 255)
+            tick.color = Color.argb(a, 0xE8, 0xED, 0xF3)
+            c.drawLine(x, cy - dp(8), x, cy + dp(8), tick)
+            x += gap
+        }
+        c.drawLine(cx, cy - dp(14), cx, cy + dp(14), mid)
+        c.drawText("VICINO", dp(30).toFloat(), height - dp(4).toFloat(), txt)
+        c.drawText("LONTANO", width - dp(32).toFloat(), height - dp(4).toFloat(), txt)
     }
 }
