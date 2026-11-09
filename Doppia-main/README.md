@@ -1,4 +1,4 @@
-# Doppia 1.9 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.18 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,11 +51,46 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
-## Novita' 1.9
-- **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre la camera posteriore del tablet: inquadra una superficie bianca o grigia neutra, illuminata dalla luce da misurare. Compare il valore in Kelvin con la scala caldo/freddo.
-- **Imposta camere**: porta il valore in Doppia, che mette il bilanciamento del bianco in temperatura colore e i Kelvin misurati su ogni camera live (al valore piu' vicino tra quelli ammessi dalla camera). Il risultato e' scritto nel Log.
+## Novita' 1.18
+- **Dominante colore**: sopra l'istogramma di ogni camera una riga tipo "verde +3, caldo +2" (media dell'immagine, non una misura con carta grigia).
+- **Confronto con la A**: sulle altre camere una seconda riga, ad esempio "vs A: +0.4 EV, +3 verde, 2 freddo". Mostra solo la differenza.
+- Si spegne in Impostazioni > Monitor. Sparisce in Ripresa.
+
+## Novita' 1.17
+- **PIN della modalita' test con tastierino a schermo**: 4 pallini, tasti da 0 a 9 e cancella. Si conferma da solo alla quarta cifra; con un PIN sbagliato resta aperto e si puo' riprovare. Annulla (o un tocco fuori) chiude senza accendere la modalita' test.
+
+## Novita' 1.16
+- **Material 3**: tema scuro M3 con la palette di Doppia (ambra, azzurro, arancio) come ruoli colore ufficiali, finestre di dialogo M3 (angoli 28 dp, superficie piu' chiara), interruttori M3 (`MaterialSwitch`), schede con angoli uniformi da 16 dp (via lo stile a gruppi alla iOS), titoli di sezione in stile M3, e il **+** come pulsante flottante M3 quadrato arrotondato con ombra. I colori dinamici di Android 12+ non sono attivi, cosi' la palette (e i colori del tally) resta sempre la stessa.
+
+## Novita' 1.15
+- **Barra in alto riorganizzata e piu' compatta**, in tre gruppi: strumenti (Scena, Set WB, Sync) | segni (✓ Buona, ✕ Scarto, ✎ Nota) | REC, modo e ⚙ Impostazioni. Pulsanti piu' bassi e stretti, separati da una linea sottile. Il modo Ripresa/Setup ora mostra ▶ Ripresa / ◀ Setup.
+
+## Novita' 1.14
+- **Piu' camere**: tasto **+** tra la prima e la seconda anteprima (solo in Setup, con tutte le anteprime visibili) per aggiungere una camera. Si apre Impostazioni > Camere per scrivere nome e indirizzo IP. **Limite: 4 camere** (costante `MAX_CAMS` in `Monitor.kt`): ognuna manda il suo live view via Wi-Fi e il tablet deve decodificarle tutte. Con 3 o 4 camere in orizzontale i riquadri diventano una griglia 2 x 2; in verticale restano una sopra l'altra.
+- Le camere aggiunte si tolgono da Impostazioni > Camere (**Rimuovi**, solo l'ultima, mai le prime due). REC A+B diventa **REC TUTTE**, Sync, REC non allineato, take, segni, scena, Premiere, guide e **Set WB** valgono per tutte le camere.
+- **Impostazioni in categorie**: Camere, Monitor, Guide, Parametri camera, Take e segni, Avvisi e tally, Aggiornamenti, Test e diagnostica. Tocca una voce per aprirla, **‹ Impostazioni** per tornare all'elenco.
+
+## Novita' 1.13
+- **Batteria sotto il 15%**: l'indicatore lampeggia in modo affidabile (il ciclo riparte da solo dopo cambi di schermata, riconnessioni e ritorni dall'app).
+- Il tasto **🌡 Kelvin** si chiama ora **🌡 Set WB** (e cosi' il titolo della finestra).
+
+## Novita' 1.12
+- **Nuovi pulsanti sul riquadro** (accanto a screenshot e sovrapposizione, in Setup): **guide** (riquadri di inquadratura e zona sicura), **zebra** e **focus peaking**. Si accendono e spengono con un tocco; giallo = acceso. Le guide che hai scelto in Impostazioni restano memorizzate.
+- **Batteria sotto il 15%**: l'indicatore della batteria lampeggia in rosso (anche in Ripresa). Compare un avviso sul riquadro.
+- **Niente suoni e vibrazione in REC**: gli avvisi di batteria e memoria in esaurimento suonano e vibrano solo se nessuna camera sta registrando; durante il REC restano solo lampeggio e avviso a schermo.
+
+## Novita' 1.11
+- **Kelvin dentro Doppia**: non e' piu' una schermata a parte. Finestra che ruota con l'app, con sorgente a scelta tra le due camere Sony (dal live view) e la camera del tablet.
+- **Note vocali**: tieni premuto **⚑ Nota** (anche il pulsante grande in Ripresa) oppure usa **🎤 Detta** nella finestra Nota. Il segno ha il momento della pressione; il testo arriva dopo la dettatura. Serve il permesso Microfono. Se non viene riconosciuto niente, il segno viene aggiunto lo stesso, senza testo. Attenzione: se le camere registrano, la voce si sente nell'audio.
+- **La nota scritta** ora segna il momento in cui premi Nota, non quello in cui finisci di scrivere.
+- **Avvisi batteria e memoria**: vibrazione e suono quando una camera scende sotto il 20% e il 10% di batteria o sotto 15 e 10 minuti di memoria (una volta per livello). Si spegne nelle Impostazioni.
+
+## Novita' 1.10
+- **Misuratore Kelvin**: tasto **🌡 Kelvin** in alto (in Setup). Si apre una finestra dentro Doppia (ruota con l'app). In alto scegli la sorgente: una delle **camere Sony** (misura dal live view: inquadra una carta grigia o bianca nel riquadro al centro; il WB della camera deve essere in Kelvin o su un preset) oppure la **camera del tablet** (inquadra una superficie bianca o grigia illuminata dalla luce da misurare). Compare il valore in Kelvin con la scala caldo/freddo.
+- **Imposta camere** / **Solo (camera)**: mette il bilanciamento del bianco in temperatura colore e i Kelvin misurati su tutte le camere live, o solo su quella misurata (al valore piu' vicino tra quelli ammessi dalla camera). Con la sorgente camera puoi misurare di nuovo dopo l'impostazione: la carta deve risultare neutra. Il risultato e' scritto nel Log.
 - Se il tablet non espone le matrici colore, la misura e' una stima approssimata (valore con ≈ davanti).
 - Aggiunto il permesso Camera (solo per il misuratore).
+- **Impostazioni sul telefono in orizzontale**: i tasti Esporta per Premiere, Copia elenco e Azzera sessione vanno a capo se non c'e' spazio, invece di schiacciarsi (e lasciare un vuoto nella finestra).
 
 ## Novita' 1.8
 - **Verticale e orizzontale**: l'app ruota con il tablet. In orizzontale le camere sono affiancate, in verticale una sopra l'altra (la barra in alto scorre di lato se i tasti non stanno). Il tocco su un riquadro lo ingrandisce a tutto schermo in entrambe le posizioni.

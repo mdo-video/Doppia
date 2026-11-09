@@ -68,7 +68,7 @@ object Session {
             val ta = j.optJSONArray("takes") ?: JSONArray()
             for (k in 0 until ta.length()) {
                 val o = ta.getJSONObject(k)
-                val tk = Take(o.getInt("c").coerceIn(0, 1), o.getInt("n"), o.getLong("s"), o.getLong("e"))
+                val tk = Take(o.getInt("c").coerceIn(0, MAX_CAMS - 1), o.getInt("n"), o.getLong("s"), o.getLong("e"))
                 tk.gj = o.optString("gj", "")
                 tk.gt = o.optString("gt", "")
                 tk.name = o.optString("nm", "")
@@ -86,7 +86,7 @@ object Session {
                 val refs = ArrayList<Ref>()
                 for (q in 0 until ra.length()) {
                     val r = ra.getJSONArray(q)
-                    refs.add(Ref(r.getInt(0).coerceIn(0, 1), r.getInt(1), r.getLong(2)))
+                    refs.add(Ref(r.getInt(0).coerceIn(0, MAX_CAMS - 1), r.getInt(1), r.getLong(2)))
                 }
                 marks.add(Mark(o.getLong("w"), o.getInt("c").coerceIn(0, 2), o.optString("t", ""), refs))
             }
@@ -378,7 +378,7 @@ object Session {
             val last = takes.maxOf { if (it.endWall == 0L) System.currentTimeMillis() else it.endWall }
             sb.append("Dalle ").append(clockOf(first).substring(0, 5)).append(" alle ").append(clockOf(last).substring(0, 5)).append('\n')
         }
-        for (c in 0..1) {
+        for (c in 0 until names.size) {
             val ts = takes.filter { it.cam == c }
             val fin = finals.getOrElse(c) { "" }
             if (ts.isEmpty() && fin.isEmpty()) continue

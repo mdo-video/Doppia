@@ -4,7 +4,19 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 
 /** Risultato dell'analisi di un fotogramma: istogramma, esposizione media e maschere per zebra / peaking. */
-class Analysis(val hist: IntArray?, val ev: Float, val zebra: Bitmap?, val peaking: Bitmap?)
+class Analysis(
+    val hist: IntArray?, val ev: Float, val zebra: Bitmap?, val peaking: Bitmap?,
+    /** Media di rosso, verde e blu del fotogramma (0-255), per dominante colore e confronto A/B. */
+    val mr: Float = 0f, val mg: Float = 0f, val mb: Float = 0f, val hasColor: Boolean = false
+) {
+    /** Tinta verde/magenta in punti percentuali: positivo = verde, negativo = magenta. */
+    val tint: Float get() = if (!hasColor) 0f else 100f * (mg - (mr + mb) / 2f) / maxOf(1f, (mr + mg + mb) / 3f)
+    /** Caldo/freddo in punti percentuali: positivo = piu' caldo (rosso), negativo = piu' freddo (blu). */
+    val warm: Float get() = if (!hasColor) 0f else 100f * (mr - mb) / maxOf(1f, (mr + mg + mb) / 3f)
+}
+
+/** Numero massimo di camere che Doppia puo' mostrare insieme. */
+const val MAX_CAMS = 4
 
 /** Guide di inquadratura: rapporti, nomi e colori (ritagli centrati sull'immagine). */
 object Guides {
@@ -13,7 +25,7 @@ object Guides {
     val colors = intArrayOf(0xFFFFC107.toInt(), 0xFF4FC3F7.toInt(), 0xFF81C784.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF7043.toInt())
 
     /** Posizione di ogni guida per camera: -1 = tutto a sinistra (o in alto), 0 = centro, 1 = tutto a destra (o in basso). */
-    val pos = Array(2) { FloatArray(5) }
+    val pos = Array(MAX_CAMS) { FloatArray(5) }
 
     /** Una guida piu' larga dell'immagine (es. 2.39:1 su 16:9) si muove in verticale, le altre in orizzontale. */
     fun axisVertical(k: Int, aspect: Float): Boolean {
@@ -39,7 +51,7 @@ object Guides {
         for (k in names.indices) {
             if ((mask and (1 shl k)) == 0) continue
             val v = axisVertical(k, aspect)
-            val p = pos[cam.coerceIn(0, 1)][k]
+            val p = pos[cam.coerceIn(0, MAX_CAMS - 1)][k]
             val o = org.json.JSONObject()
             o.put("guide", names[k])
             o.put("pos", Math.round(p * 1000f) / 1000f.toDouble())
@@ -52,11 +64,11 @@ object Guides {
     }
 
     fun load(p: SharedPreferences) {
-        for (c in 0..1) for (k in names.indices) pos[c][k] = p.getFloat("gpos_${c}_$k", 0f).coerceIn(-1f, 1f)
+        for (c in 0 until MAX_CAMS) for (k in names.indices) pos[c][k] = p.getFloat("gpos_${c}_$k", 0f).coerceIn(-1f, 1f)
     }
 
     fun save(e: SharedPreferences.Editor) {
-        for (c in 0..1) for (k in names.indices) e.putFloat("gpos_${c}_$k", pos[c][k])
+        for (c in 0 until MAX_CAMS) for (k in names.indices) e.putFloat("gpos_${c}_$k", pos[c][k])
     }
 }
 
@@ -69,9 +81,15 @@ object Monitor {
     @Volatile var grid = false
     @Volatile var histogram = true
     @Volatile var meter = true
+    @Volatile var cast = true            // dominante colore e confronto A/B
     @Volatile var guides = 0             // bit k acceso = guida Guides.names[k] visibile
     @Volatile var safe = false           // zona sicura 9:16
     @Volatile var guideLock = true       // guide bloccate (non si spostano)
+    @Volatile var guidesShow = true      // interruttore rapido: mostra/nasconde guide e zona sicura
+
+    /** Guide effettivamente visibili (rispettano l'interruttore rapido). */
+    val guidesOn: Int get() = if (guidesShow) guides else 0
+    val safeOn: Boolean get() = guidesShow && safe
 
     fun load(p: SharedPreferences) {
         zebra = p.getBoolean("mon_zebra", false)
@@ -81,9 +99,11 @@ object Monitor {
         grid = p.getBoolean("mon_grid", false)
         histogram = p.getBoolean("mon_hist", true)
         meter = p.getBoolean("mon_meter", true)
+        cast = p.getBoolean("mon_cast", true)
         guides = p.getInt("mon_guides", 0)
         safe = p.getBoolean("mon_safe", false)
         guideLock = p.getBoolean("mon_glock", true)
+        guidesShow = p.getBoolean("mon_gshow", true)
         Guides.load(p)
     }
 
@@ -91,9 +111,9 @@ object Monitor {
         p.edit()
             .putBoolean("mon_zebra", zebra).putInt("mon_zlevel", zebraLevel)
             .putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
-            .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter)
+            .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter).putBoolean("mon_cast", cast)
             .putInt("mon_guides", guides).putBoolean("mon_safe", safe)
-            .putBoolean("mon_glock", guideLock)
+            .putBoolean("mon_glock", guideLock).putBoolean("mon_gshow", guidesShow)
             .also { Guides.save(it) }
             .apply()
     }
@@ -108,7 +128,8 @@ object Monitor {
         val pk = peaking
         val wantHist = histogram
         val wantMeter = meter
-        if (!z && !pk && !wantHist && !wantMeter) return null
+        val wantCast = cast
+        if (!z && !pk && !wantHist && !wantMeter && !wantCast) return null
 
         val w = 384
         val h = maxOf(2, (src.height.toLong() * w / src.width).toInt())
@@ -120,13 +141,26 @@ object Monitor {
         val y = IntArray(w * h)
         val hist = IntArray(64)
         var sum = 0.0
+        // medie colore: solo i pixel ne' bruciati ne' neri; se sono troppo pochi si usano tutti
+        var sr = 0L; var sg = 0L; var sb = 0L; var sn = 0
+        var ar = 0L; var ag = 0L; var ab = 0L
         for (i in px.indices) {
             val c = px[i]
-            val lum = (77 * ((c shr 16) and 0xff) + 150 * ((c shr 8) and 0xff) + 29 * (c and 0xff)) shr 8
+            val r8 = (c shr 16) and 0xff
+            val g8 = (c shr 8) and 0xff
+            val b8 = c and 0xff
+            val lum = (77 * r8 + 150 * g8 + 29 * b8) shr 8
             y[i] = lum
             hist[lum shr 2]++
             sum += lin[lum]
+            ar += r8; ag += g8; ab += b8
+            if (lum in 16..240) { sr += r8; sg += g8; sb += b8; sn++ }
         }
+        val useAll = sn < px.size / 100
+        val cn = if (useAll) px.size else sn
+        val cr = (if (useAll) ar else sr).toFloat() / cn
+        val cg = (if (useAll) ag else sg).toFloat() / cn
+        val cb = (if (useAll) ab else sb).toFloat() / cn
         val mean = sum / px.size
         val ev = (Math.log(Math.max(mean, 1e-4) / 0.18) / Math.log(2.0)).toFloat().coerceIn(-5f, 5f)
 
@@ -158,6 +192,6 @@ object Monitor {
             }
             pb = Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
         }
-        return Analysis(if (wantHist) hist else null, ev, zb, pb)
+        return Analysis(if (wantHist) hist else null, ev, zb, pb, cr, cg, cb, wantCast)
     }
 }

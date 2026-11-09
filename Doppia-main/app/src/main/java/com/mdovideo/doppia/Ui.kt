@@ -20,6 +20,10 @@ object Pal {
     val TEXT: Int = Color.parseColor("#E8EDF3")
     val MUTED: Int = Color.parseColor("#94A0B0")
     val OK: Int = Color.parseColor("#81C784")
+    // ruoli Material 3 usati dai componenti disegnati a mano
+    val SURFACE_HIGH: Int = Color.parseColor("#222A35")
+    val PRIMARY_CONTAINER: Int = Color.parseColor("#4A3A00")
+    val ON_PRIMARY_CONTAINER: Int = Color.parseColor("#FFE08A")
 }
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -41,15 +45,11 @@ fun roundBg(color: Int, radiusDp: Int, ctx: Context): GradientDrawable {
     return g
 }
 
-/** Riga raggruppata stile iOS: angoli grandi sulla prima/ultima, piccoli in mezzo. */
+/** Riga/scheda Material 3: angoli uniformi da 16 dp (first e last restano per compatibilita'). */
 fun Context.rowBg(first: Boolean, last: Boolean, color: Int): GradientDrawable {
-    val big = dp(24).toFloat()
-    val small = dp(6).toFloat()
-    val t = if (first) big else small
-    val b = if (last) big else small
     val g = GradientDrawable()
     g.setColor(color)
-    g.cornerRadii = floatArrayOf(t, t, t, t, b, b, b, b)
+    g.cornerRadius = dp(16).toFloat()
     return g
 }
 
