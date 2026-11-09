@@ -1,4 +1,4 @@
-# Doppia 1.17 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.18 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -51,6 +51,12 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
 
+## Novita' 1.18
+- **Valori da scorrere col dito**: Kelvin, otturatore, diaframma, ISO, WB, EV e gli altri valori della barra non si premono piu': si fa scorrere la fila e vale il valore **al centro** (evidenziato su una fascia gialla). Si ferma da sola sul valore piu' vicino e lo manda alla camera; i Kelvin vengono mandati anche mentre scorri, quelli come otturatore e ISO quando ti fermi.
+- **Fila piu' corta**: la ruota e' larga al massimo 300 dp e sta al centro, non piu' per tutta la larghezza. I valori ai bordi (come **AUTO** dell'ISO) arrivano sempre al centro.
+- **Funziona anche a tutto schermo**: lo slider dei Kelvin stava dentro a una fila scorrevole che si prendeva il tocco; ora la ruota e' lei stessa lo scorrimento.
+- Lo switch **AF/MF** resta com'e'.
+
 ## Novita' 1.17
 - **Switch AF/MF e slider Kelvin**: FOCUS ora e' un interruttore da toccare o far scorrere; i Kelvin si scelgono trascinando uno slider invece di scorrere un elenco lungo.
 - **Messa a fuoco AF/MF**: nuovo valore FOCUS nella barra di ogni camera (AF-S, AF-C, MF); compare solo se la camera lo espone. Con Sync accesa si cambia su tutte.
@@ -58,6 +64,7 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Set WB piu' semplice**: ora e' in 3 passi (scegli con cosa misurare, inquadra una carta grigia o bianca, imposta le camere). Il pulsante mostra il valore ("Imposta le camere a 5200 K") e i messaggi dicono cosa fare, ad esempio quando la camera e' su Auto.
 - **Colore delle camere**: a parole se l'immagine tira al verde/magenta o al caldo/freddo; sulle altre camere confronto di luce e colore con la prima, col consiglio di usare Set WB. Si spegne in Impostazioni > Monitor.
 - **PIN della modalita' test con tastierino a schermo**: 4 pallini, tasti da 0 a 9 e cancella. Si conferma da solo alla quarta cifra; con un PIN sbagliato resta aperto e si puo' riprovare. Annulla (o un tocco fuori) chiude senza accendere la modalita' test.
+
 
 ## Novita' 1.16
 - **Material 3**: tema scuro M3 con la palette di Doppia (ambra, azzurro, arancio) come ruoli colore ufficiali, finestre di dialogo M3 (angoli 28 dp, superficie piu' chiara), interruttori M3 (`MaterialSwitch`), schede con angoli uniformi da 16 dp (via lo stile a gruppi alla iOS), titoli di sezione in stile M3, e il **+** come pulsante flottante M3 quadrato arrotondato con ombra. I colori dinamici di Android 12+ non sono attivi, cosi' la palette (e i colori del tally) resta sempre la stessa.
