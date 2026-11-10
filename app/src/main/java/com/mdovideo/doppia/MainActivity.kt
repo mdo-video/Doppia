@@ -938,11 +938,13 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             val t = TextView(ctx)
             t.text = titles[k]
             t.textSize = 9f
+            t.isSingleLine = true
             t.setTextColor(Pal.MUTED)
             t.gravity = Gravity.CENTER
             val v = TextView(ctx)
             v.text = "—"
             v.textSize = 19f
+            v.isSingleLine = true
             v.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             v.setTextColor(Pal.MUTED)
             v.gravity = Gravity.CENTER
@@ -961,10 +963,16 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         meterBox.addView(meterV, LinearLayout.LayoutParams(dp(130), dp(38)))
         bar.addView(meterBox)
 
+        // La barra sta in una fila scorrevole: se i valori sono troppi per la larghezza del riquadro
+        // scorre, invece di schiacciarli (i testi andavano a capo e la barra diventava altissima).
+        val barHs = HorizontalScrollView(ctx)
+        barHs.isHorizontalScrollBarEnabled = false
+        barHs.overScrollMode = View.OVER_SCROLL_NEVER
+        barHs.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val barLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         barLp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         barLp.bottomMargin = dp(12)
-        addView(bar, barLp)
+        addView(barHs, barLp)
 
         // Selettore valori sopra la barra (scorre in orizzontale, tocca per scegliere)
         pickerRow.orientation = LinearLayout.HORIZONTAL
@@ -1435,6 +1443,16 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         picker.visibility = View.VISIBLE
         for (c in chipCodes) chipBox[c]?.background = if (c == code) roundBg(0x33FFC107.toInt(), 12, context) else null
         highlight(p.current, true)
+    }
+
+    /** Riquadro stretto (due camere affiancate): valori della barra piu' piccoli, cosi' ci stanno tutti. */
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        val compact = w < dp(520)
+        for (code in chipCodes) {
+            chipVal[code]?.textSize = if (compact) 15f else 19f
+            chipBox[code]?.setPadding(dp(if (compact) 6 else 9), dp(3), dp(if (compact) 6 else 9), dp(3))
+        }
     }
 
     private fun pickerLabel(text: String): TextView = TextView(context).apply {

@@ -57,6 +57,7 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Funziona anche a tutto schermo**: lo slider dei Kelvin stava dentro a una fila scorrevole che si prendeva il tocco; ora la ruota e' lei stessa lo scorrimento.
 - Lo switch **AF/MF** resta com'e' ma e' ora un interruttore Material 3; il dialogo Scena usa il dialogo Material 3.
 - **Ruota dei valori**: un tick di vibrazione a ogni valore e bordi sfumati piu' marcati.
+- **Barra dei valori sempre in ordine**: con due camere affiancate e tutti i valori (KELVIN compreso) la barra si allargava oltre il riquadro, i testi andavano a capo e la barra diventava altissima coprendo i pulsanti. Ora i valori non vanno mai a capo, nei riquadri stretti sono un po' piu' piccoli e, se ancora non ci stanno, la barra scorre.
 - **Aree di tocco da 48 dp** per i valori della barra, il REC, i pulsanti sul riquadro e i valori della ruota.
 
 ## Novita' 1.17
