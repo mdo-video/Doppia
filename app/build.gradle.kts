@@ -57,11 +57,13 @@ android {
     // Chiave di firma fissa: stessa firma a ogni build, gli aggiornamenti si installano sopra.
     signingConfigs {
         create("fixed") {
-            storeFile = file("doppia.p12")
+            // Se le variabili d'ambiente DOPPIA_* sono impostate (GitHub Secrets) si usa quella chiave,
+            // altrimenti resta quella nel progetto: cosi' le build di prima continuano a funzionare.
+            storeFile = file(System.getenv("DOPPIA_KEYSTORE") ?: "doppia.p12")
             storeType = "pkcs12"
-            storePassword = "vicino"
-            keyAlias = "vicino"
-            keyPassword = "vicino"
+            storePassword = System.getenv("DOPPIA_STORE_PASSWORD") ?: "vicino"
+            keyAlias = System.getenv("DOPPIA_KEY_ALIAS") ?: "vicino"
+            keyPassword = System.getenv("DOPPIA_KEY_PASSWORD") ?: "vicino"
         }
     }
 

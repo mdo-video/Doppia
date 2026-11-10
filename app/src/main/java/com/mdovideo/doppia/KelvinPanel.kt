@@ -733,6 +733,7 @@ class KelvinPanel(private val host: KelvinHost) {
             cm.openCamera(id, object : CameraDevice.StateCallback() {
                 override fun onOpened(d: CameraDevice) {
                     opening = false
+                    if (camThread == null || !dlg.isShowing) { d.close(); return } // pannello chiuso nel frattempo
                     device = d
                     main.post { startTabletPreview() }
                 }

@@ -66,7 +66,7 @@ object Session {
         try {
             val j = JSONObject(p.getString(KEY, "") ?: "")
             val ta = j.optJSONArray("takes") ?: JSONArray()
-            for (k in 0 until ta.length()) {
+            for (k in 0 until ta.length()) try {
                 val o = ta.getJSONObject(k)
                 val tk = Take(o.getInt("c").coerceIn(0, MAX_CAMS - 1), o.getInt("n"), o.getLong("s"), o.getLong("e"))
                 tk.gj = o.optString("gj", "")
@@ -78,9 +78,11 @@ object Session {
                     tk.lost.add(longArrayOf(g.getLong(0), g.getLong(1)))
                 }
                 takes.add(tk)
+            } catch (_: Throwable) {
+                // record rovinato: lo salta e tiene gli altri
             }
             val ma = j.optJSONArray("marks") ?: JSONArray()
-            for (k in 0 until ma.length()) {
+            for (k in 0 until ma.length()) try {
                 val o = ma.getJSONObject(k)
                 val ra = o.optJSONArray("r") ?: JSONArray()
                 val refs = ArrayList<Ref>()
@@ -89,6 +91,8 @@ object Session {
                     refs.add(Ref(r.getInt(0).coerceIn(0, MAX_CAMS - 1), r.getInt(1), r.getLong(2)))
                 }
                 marks.add(Mark(o.getLong("w"), o.getInt("c").coerceIn(0, 2), o.optString("t", ""), refs))
+            } catch (_: Throwable) {
+                // record rovinato: lo salta e tiene gli altri
             }
         } catch (_: Throwable) {
             takes.clear()

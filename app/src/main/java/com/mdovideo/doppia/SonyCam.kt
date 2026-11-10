@@ -322,7 +322,12 @@ class SonyCam(
             // Attendo che "Live View Status" (0xD221) diventi 1, leggendo la tabella proprieta'.
             var status = -1
             var waits = 0
+            val waitUntil = System.nanoTime() + 45_000_000_000L
             while (running && status != 1) {
+                while (true) { val cmd = cmds.poll() ?: break; cmd(c) } // REC e altri comandi non restano in coda
+                if (System.nanoTime() > waitUntil) {
+                    throw IllegalStateException("La camera non avvia il live view dopo 45 s (stato $status). Controlla il modo di collegamento sulla camera")
+                }
                 val t = c.transaction(0x9209, intArrayOf(0, 0))
                 status = if (t.ok) livePropValue(t.data, 0xD221) else -2
                 if (waits == 0) say("Tabella proprieta' (0x9209): ${hex(t.code)}, ${t.data.size} byte, Live View Status = $status")
@@ -364,8 +369,13 @@ class SonyCam(
                     if (r.code == 0x2009) { // oggetto non valido: il live view si e' spento
                         status = 0
                         say("Live view spento dalla camera, attendo di nuovo")
+                        val reUntil = System.nanoTime() + 45_000_000_000L
                         while (running && status != 1) {
                             Thread.sleep(300)
+                            while (true) { val cmd = cmds.poll() ?: break; cmd(c) }
+                            if (System.nanoTime() > reUntil) {
+                                throw IllegalStateException("La camera non riavvia il live view dopo 45 s")
+                            }
                             val t = c.transaction(0x9209, intArrayOf(0, 0))
                             status = if (t.ok) livePropValue(t.data, 0xD221) else -2
                         }

@@ -1639,6 +1639,10 @@ class MainActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("doppia", MODE_PRIVATE) }
     private val cams = arrayOfNulls<SonyCam>(MAX_CAMS)
+
+    /** Ultimo fotogramma di ogni camera in attesa di essere mostrato: se l'interfaccia e' occupata, quelli vecchi vengono scartati. */
+    private class FramePack(val bmp: Bitmap, val ms: Int, val a: Analysis?, val cmp: CastCmp?)
+    private val frameRef = Array(MAX_CAMS) { java.util.concurrent.atomic.AtomicReference<FramePack?>(null) }
     /** Modalita' test (camere finte): sempre spenta all'avvio, si accende in Impostazioni con il PIN. */
     private var simOn = false
     private val tiles = ArrayList<Tile>()
@@ -4012,7 +4016,12 @@ class MainActivity : AppCompatActivity() {
             { bmp, ms ->
                 val a = Monitor.analyze(bmp)
                 val cmp = compareText(i, a)
-                runOnUiThread { tiles[i].setFrame(bmp, ms, a, cmp) }
+                // se c'e' gia' un fotogramma in attesa, basta sostituirlo: il lavoro sull'interfaccia e' gia' in coda
+                val old = frameRef[i].getAndSet(FramePack(bmp, ms, a, cmp))
+                if (old == null) runOnUiThread {
+                    val f = frameRef[i].getAndSet(null)
+                    if (f != null) tiles[i].setFrame(f.bmp, f.ms, f.a, f.cmp)
+                }
             },
             { m -> runOnUiThread { tiles[i].setProps(m); noteInfo(i, m); refreshSettings() } },
             simOn
