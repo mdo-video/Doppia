@@ -123,6 +123,30 @@ object Monitor {
     /** Va chiamata fuori dal thread principale. Ritorna null se nessuno strumento e' acceso. */
     fun analyze(src: Bitmap): Analysis? = try { analyzeInner(src) } catch (_: Throwable) { null }
 
+    /** Memoria di lavoro riusata a ogni fotogramma (una per thread): meno rifiuti da raccogliere con 3 o 4 camere. */
+    private class Scratch {
+        var n = 0
+        var px = IntArray(0)
+        var y = IntArray(0)
+        var t = IntArray(0)
+        var sm = IntArray(0)
+        var out = IntArray(0)
+        var m = ByteArray(0)
+        fun ensure(size: Int) {
+            if (n == size) return
+            n = size
+            px = IntArray(size); y = IntArray(size); t = IntArray(size)
+            sm = IntArray(size); out = IntArray(size); m = ByteArray(size)
+        }
+    }
+
+    private val scratch = object : ThreadLocal<Scratch>() {
+        override fun initialValue(): Scratch = Scratch()
+    }
+
+    /** Soglia del peaking: variazione di luminanza (dopo la sfocatura) sopra la quale un bordo e' "a fuoco". */
+    private const val PEAK_THR = 40
+
     private fun analyzeInner(src: Bitmap): Analysis? {
         val z = zebra
         val pk = peaking
@@ -131,20 +155,24 @@ object Monitor {
         val wantCast = cast
         if (!z && !pk && !wantHist && !wantMeter && !wantCast) return null
 
-        val w = 384
+        // Il peaking vuole piu' dettaglio degli altri strumenti
+        val w = if (pk) 640 else 384
         val h = maxOf(2, (src.height.toLong() * w / src.width).toInt())
         val small = Bitmap.createScaledBitmap(src, w, h, true)
-        val px = IntArray(w * h)
+        val sc = scratch.get()!!
+        sc.ensure(w * h)
+        val px = sc.px
         small.getPixels(px, 0, w, 0, 0, w, h)
         if (small !== src) small.recycle()
 
-        val y = IntArray(w * h)
+        val y = sc.y
         val hist = IntArray(64)
         var sum = 0.0
         // medie colore: solo i pixel ne' bruciati ne' neri; se sono troppo pochi si usano tutti
         var sr = 0L; var sg = 0L; var sb = 0L; var sn = 0
         var ar = 0L; var ag = 0L; var ab = 0L
-        for (i in px.indices) {
+        val total = w * h
+        for (i in 0 until total) {
             val c = px[i]
             val r8 = (c shr 16) and 0xff
             val g8 = (c shr 8) and 0xff
@@ -156,18 +184,19 @@ object Monitor {
             ar += r8; ag += g8; ab += b8
             if (lum in 16..240) { sr += r8; sg += g8; sb += b8; sn++ }
         }
-        val useAll = sn < px.size / 100
-        val cn = if (useAll) px.size else sn
+        val useAll = sn < total / 100
+        val cn = if (useAll) total else sn
         val cr = (if (useAll) ar else sr).toFloat() / cn
         val cg = (if (useAll) ag else sg).toFloat() / cn
         val cb = (if (useAll) ab else sb).toFloat() / cn
-        val mean = sum / px.size
+        val mean = sum / total
         val ev = (Math.log(Math.max(mean, 1e-4) / 0.18) / Math.log(2.0)).toFloat().coerceIn(-5f, 5f)
 
         var zb: Bitmap? = null
         if (z) {
             val thr = (zebraLevel * 255 + 50) / 100
-            val out = IntArray(w * h)
+            val out = sc.out
+            java.util.Arrays.fill(out, 0, total, 0)
             for (yy in 0 until h) {
                 for (xx in 0 until w) {
                     val i = yy * w + xx
@@ -182,12 +211,47 @@ object Monitor {
         var pb: Bitmap? = null
         if (pk) {
             val col = peakColor
-            val out = IntArray(w * h)
+            val t = sc.t
+            val sm = sc.sm
+            val m = sc.m
+            // 1) sfocatura 1-2-1 in orizzontale e in verticale: toglie il rumore a puntini
+            for (yy in 0 until h) {
+                val r = yy * w
+                for (xx in 0 until w) {
+                    val a = y[r + (if (xx > 0) xx - 1 else 0)]
+                    val b = y[r + xx]
+                    val c = y[r + (if (xx < w - 1) xx + 1 else w - 1)]
+                    t[r + xx] = (a + 2 * b + c) shr 2
+                }
+            }
+            for (yy in 0 until h) {
+                val r = yy * w
+                val up = (if (yy > 0) yy - 1 else 0) * w
+                val dn = (if (yy < h - 1) yy + 1 else h - 1) * w
+                for (xx in 0 until w) sm[r + xx] = (t[up + xx] + 2 * t[r + xx] + t[dn + xx]) shr 2
+            }
+            // 2) bordi netti: variazione di luminanza sopra soglia
+            java.util.Arrays.fill(m, 0, total, 0.toByte())
             for (yy in 0 until h - 1) {
                 for (xx in 0 until w - 1) {
                     val i = yy * w + xx
-                    val g = Math.abs(y[i] - y[i + 1]) + Math.abs(y[i] - y[i + w])
-                    if (g > 70) out[i] = col
+                    val g = Math.abs(sm[i] - sm[i + 1]) + Math.abs(sm[i] - sm[i + w])
+                    if (g > PEAK_THR) m[i] = 1
+                }
+            }
+            // 3) un bordo vero e' una linea: si tengono solo i punti con almeno 2 vicini accesi, e si ispessisce un po'
+            val out = sc.out
+            java.util.Arrays.fill(out, 0, total, 0)
+            for (yy in 1 until h - 1) {
+                for (xx in 1 until w - 1) {
+                    val i = yy * w + xx
+                    if (m[i].toInt() == 0) continue
+                    val nb = m[i - 1] + m[i + 1] + m[i - w] + m[i + w] + m[i - w - 1] + m[i - w + 1] + m[i + w - 1] + m[i + w + 1]
+                    if (nb >= 2) {
+                        out[i] = col
+                        out[i + 1] = col
+                        out[i + w] = col
+                    }
                 }
             }
             pb = Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
