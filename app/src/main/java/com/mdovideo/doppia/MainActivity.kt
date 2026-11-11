@@ -1782,6 +1782,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Monitor.load(prefs)
+        PhoneFeed.wanted = prefs.getBoolean("phone_cam", false)
+        PhoneFeed.init(applicationContext) { displayRotationDeg() }
         syncOn = prefs.getBoolean("sync", false)
         Session.load(prefs)
         for (i in 0 until MAX_CAMS) {
@@ -3559,6 +3561,24 @@ class MainActivity : AppCompatActivity() {
         testHint.textSize = 13f
         testHint.setPadding(0, dp(6), 0, 0)
         col.addView(testHint)
+        col.addView(toggleRow("Immagine dalla camera del telefono", PhoneFeed.wanted) { on ->
+            PhoneFeed.wanted = on
+            prefs.edit().putBoolean("phone_cam", on).apply()
+            if (on && checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 71)
+            }
+            if (simOn) {
+                for (i in 0 until MAX_CAMS) { cams[i]?.stop(); cams[i] = null }
+                addLog(if (on) "Camere simulate: ora con la camera del telefono" else "Camere simulate: di nuovo immagine di prova")
+                Toast.makeText(this, "Tocca Connetti sui riquadri per ripartire", Toast.LENGTH_LONG).show()
+            }
+        })
+        val phoneHint = TextView(this)
+        phoneHint.text = "Nelle camere simulate si vede la scena vera inquadrata dal telefono (camera posteriore), che si schiarisce o scurisce con ISO, diaframma e otturatore. Utile per provare falsi colori, zebra, peaking e istogramma. La camera B e' un po' piu' calda, per provare il confronto colore."
+        phoneHint.setTextColor(Pal.MUTED)
+        phoneHint.textSize = 13f
+        phoneHint.setPadding(0, dp(6), 0, 0)
+        col.addView(phoneHint)
 
         col.addView(sectionTitle("Diagnostica"))
         val copy = pillButton("Copia log e proprietà delle camere")
@@ -3869,6 +3889,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- Collegamento ----------
+
+    /** Di quanto e' ruotato lo schermo (0, 90, 180, 270): serve a raddrizzare l'immagine della camera del telefono. */
+    @Suppress("DEPRECATION")
+    private fun displayRotationDeg(): Int = when (windowManager.defaultDisplay.rotation) {
+        android.view.Surface.ROTATION_90 -> 90
+        android.view.Surface.ROTATION_180 -> 180
+        android.view.Surface.ROTATION_270 -> 270
+        else -> 0
+    }
 
     /** Accende o spegne le camere finte: ferma le camere in corso e le ricollega nel nuovo modo. */
     private fun setSim(on: Boolean) {

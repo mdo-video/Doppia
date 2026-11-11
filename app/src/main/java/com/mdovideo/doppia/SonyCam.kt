@@ -142,6 +142,7 @@ class SonyCam(
 
     /** Camera finta: fotogrammi disegnati al momento, valori che si possono cambiare, REC, batteria e memoria che scendono in fretta. */
     private fun simLoop() {
+        var usedPhone = false
         try {
             onState(CamState.CONNECTING)
             say("MODALITA' TEST: camera simulata, nessun collegamento reale")
@@ -173,6 +174,12 @@ class SonyCam(
             var lastTick = t0
             var frames = 0
             val clock = java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT)
+            // immagine vera dalla camera del telefono, se richiesta in Impostazioni > Test
+            if (PhoneFeed.wanted) {
+                usedPhone = PhoneFeed.acquire()
+                if (usedPhone) say("Camera del telefono accesa come sorgente di immagini")
+                else say("Camera del telefono non disponibile (${PhoneFeed.lastError.ifEmpty { "sconosciuto" }}): uso l'immagine di prova")
+            }
             say("Camera simulata pronta")
             while (running) {
                 val now = System.currentTimeMillis()
@@ -204,29 +211,34 @@ class SonyCam(
                 k = k.coerceIn(0.05, 6.0)
                 val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 val cv = android.graphics.Canvas(bmp)
-                fun lum(v: Int) = (v * k).toInt().coerceIn(0, 255)
-                // sfondo a gradiente (bianco a destra: fa scattare zebra e istogramma)
-                for (x in 0 until w step 6) {
-                    val g = lum(20 + 235 * x / w)
-                    paint.color = android.graphics.Color.rgb(if (isA) lum(g * 90 / 255 + 10) else g, if (isA) g else lum(g * 70 / 100), if (isA) lum(g * 120 / 100) else lum(g * 40 / 100))
-                    cv.drawRect(x.toFloat(), 0f, (x + 6).toFloat(), h.toFloat(), paint)
+                val phone = if (usedPhone) PhoneFeed.latest() else null
+                if (phone != null) {
+                    drawPhone(cv, phone, k, isA, w, h, paint, now, clock)
+                } else {
+                    fun lum(v: Int) = (v * k).toInt().coerceIn(0, 255)
+                    // sfondo a gradiente (bianco a destra: fa scattare zebra e istogramma)
+                    for (x in 0 until w step 6) {
+                        val g = lum(20 + 235 * x / w)
+                        paint.color = android.graphics.Color.rgb(if (isA) lum(g * 90 / 255 + 10) else g, if (isA) g else lum(g * 70 / 100), if (isA) lum(g * 120 / 100) else lum(g * 40 / 100))
+                        cv.drawRect(x.toFloat(), 0f, (x + 6).toFloat(), h.toFloat(), paint)
+                    }
+                    // zona a scacchi fitti (per il focus peaking)
+                    for (yy in 0 until 8) for (xx in 0 until 16) {
+                        paint.color = if ((xx + yy) % 2 == 0) android.graphics.Color.rgb(lum(230), lum(230), lum(230)) else android.graphics.Color.rgb(lum(25), lum(25), lum(25))
+                        cv.drawRect((60 + xx * 10).toFloat(), (260 + yy * 10).toFloat(), (70 + xx * 10).toFloat(), (270 + yy * 10).toFloat(), paint)
+                    }
+                    // pallina che si muove
+                    val ang = (now - t0) / 700.0
+                    paint.color = android.graphics.Color.rgb(lum(255), lum(200), lum(40))
+                    cv.drawCircle((w / 2 + Math.cos(ang) * 240).toFloat(), (h / 2 + Math.sin(ang * 1.3) * 120).toFloat(), 46f, paint)
+                    // scritte
+                    paint.color = android.graphics.Color.WHITE
+                    paint.textSize = 64f
+                    paint.isFakeBoldText = true
+                    cv.drawText("TEST", 40f, 100f, paint)
+                    paint.textSize = 30f
+                    cv.drawText("$tag  ${clock.format(java.util.Date(now))}", 40f, 150f, paint)
                 }
-                // zona a scacchi fitti (per il focus peaking)
-                for (yy in 0 until 8) for (xx in 0 until 16) {
-                    paint.color = if ((xx + yy) % 2 == 0) android.graphics.Color.rgb(lum(230), lum(230), lum(230)) else android.graphics.Color.rgb(lum(25), lum(25), lum(25))
-                    cv.drawRect((60 + xx * 10).toFloat(), (260 + yy * 10).toFloat(), (70 + xx * 10).toFloat(), (270 + yy * 10).toFloat(), paint)
-                }
-                // pallina che si muove
-                val ang = (now - t0) / 700.0
-                paint.color = android.graphics.Color.rgb(lum(255), lum(200), lum(40))
-                cv.drawCircle((w / 2 + Math.cos(ang) * 240).toFloat(), (h / 2 + Math.sin(ang * 1.3) * 120).toFloat(), 46f, paint)
-                // scritte
-                paint.color = android.graphics.Color.WHITE
-                paint.textSize = 64f
-                paint.isFakeBoldText = true
-                cv.drawText("TEST", 40f, 100f, paint)
-                paint.textSize = 30f
-                cv.drawText("$tag  ${clock.format(java.util.Date(now))}", 40f, 150f, paint)
                 frames++
                 val ms = ((System.nanoTime() - fs) / 1_000_000L).toInt() + 8
                 if (frames == 1) say("Primo fotogramma simulato: ${w}x$h")
@@ -246,8 +258,37 @@ class SonyCam(
         } catch (t: Throwable) {
             if (running) { say("Errore simulazione: ${t.message ?: t.javaClass.simpleName}"); onState(CamState.ERROR) }
         } finally {
+            if (usedPhone) PhoneFeed.release()
             running = false
         }
+    }
+
+    /** Disegna l'immagine del telefono come fotogramma della camera finta: luminosita' secondo l'esposizione, la camera B un po' piu' calda. */
+    private fun drawPhone(
+        cv: android.graphics.Canvas, src: Bitmap, k: Double, isA: Boolean, w: Int, h: Int,
+        paint: android.graphics.Paint, now: Long, clock: java.text.SimpleDateFormat
+    ) {
+        val sc = Math.max(w.toFloat() / src.width, h.toFloat() / src.height)
+        val m = android.graphics.Matrix()
+        m.postScale(sc, sc)
+        m.postTranslate((w - src.width * sc) / 2f, (h - src.height * sc) / 2f)
+        val kf = k.toFloat()
+        val rg = if (isA) 1f else 1.12f
+        val bg = if (isA) 1f else 0.85f
+        val cm = android.graphics.ColorMatrix(floatArrayOf(
+            rg * kf, 0f, 0f, 0f, 0f,
+            0f, kf, 0f, 0f, 0f,
+            0f, 0f, bg * kf, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        paint.isFilterBitmap = true
+        paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+        cv.drawBitmap(src, m, paint)
+        paint.colorFilter = null
+        paint.color = android.graphics.Color.WHITE
+        paint.textSize = 26f
+        paint.isFakeBoldText = true
+        cv.drawText("TEST  $tag  ${clock.format(java.util.Date(now))}", 24f, 44f, paint)
     }
 
     fun start() {
