@@ -448,7 +448,7 @@ class GuidesView(ctx: Context) : View(ctx) {
 
 /** Pulsante tondo con icona disegnata: fotocamera (screenshot), condividi, livelli (sovrapposizione). */
 class IconButton(ctx: Context) : View(ctx) {
-    enum class Kind { CAMERA, SHARE, LAYERS, GUIDES, ZEBRA, PEAK }
+    enum class Kind { CAMERA, SHARE, LAYERS, GUIDES, ZEBRA, PEAK, FC }
 
     var kind = Kind.CAMERA
         set(v) { field = v; invalidate() }
@@ -509,6 +509,15 @@ class IconButton(ctx: Context) : View(ctx) {
                 c.drawLine(l, b, r, t, stroke)
                 c.drawLine(l + sz * 0.4f, b, r, b - sz * 0.6f, stroke)
             }
+            Kind.FC -> {
+                val l = w * 0.28f
+                val r = w * 0.72f
+                val t = h * 0.28f
+                val b = h * 0.72f
+                c.drawRoundRect(l, t, r, b, w * 0.05f, w * 0.05f, stroke)
+                c.drawLine(l, t + (b - t) / 3f, r, t + (b - t) / 3f, stroke)
+                c.drawLine(l, t + 2f * (b - t) / 3f, r, t + 2f * (b - t) / 3f, stroke)
+            }
             Kind.PEAK -> {
                 c.drawLine(w * 0.26f, h * 0.70f, w * 0.45f, h * 0.34f, stroke)
                 c.drawLine(w * 0.45f, h * 0.34f, w * 0.60f, h * 0.58f, stroke)
@@ -524,6 +533,8 @@ class IconButton(ctx: Context) : View(ctx) {
 class Tile(ctx: Context, private val label: String, private val accent: Int) : FrameLayout(ctx) {
     private val img = ImageView(ctx)
     private val zebraImg = ImageView(ctx)
+    private val fcImg = ImageView(ctx)
+    private val fcLegend = LinearLayout(ctx)
     private val peakImg = ImageView(ctx)
     private val gridV = GridView(ctx)
     private val guideV = GuidesView(ctx)
@@ -587,6 +598,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     private val guideBtn = IconButton(ctx)
     private val zebraBtn = IconButton(ctx)
     private val peakBtn = IconButton(ctx)
+    private val fcBtn = IconButton(ctx)
     private val ovlPanel = LinearLayout(ctx)
     private val ovlLabel = TextView(ctx)
     private val ovlSeek = SeekBar(ctx)
@@ -627,6 +639,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
     var onToggleGuides: (() -> Unit)? = null
     var onToggleZebra: (() -> Unit)? = null
     var onTogglePeak: (() -> Unit)? = null
+    var onToggleFc: (() -> Unit)? = null
 
     // Batteria scarica: l'indicatore lampeggia (solo visivo)
     private var lowBattOn = false
@@ -673,6 +686,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         guideBtn.active = Monitor.guidesShow
         zebraBtn.active = Monitor.zebra
         peakBtn.active = Monitor.peaking
+        fcBtn.active = Monitor.falseColor
         if (hasFrame) {
             guideV.mask = Monitor.guidesOn
             guideV.safe = Monitor.safeOn
@@ -680,6 +694,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             updateGuideBar()
             guideV.invalidate()
             if (!Monitor.zebra) zebraImg.visibility = View.GONE
+            if (!Monitor.falseColor) { fcImg.visibility = View.GONE; fcLegend.visibility = View.GONE }
             if (!Monitor.peaking) peakImg.visibility = View.GONE
         }
     }
@@ -716,6 +731,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         overlayImg.alpha = 0.5f
         overlayImg.visibility = View.GONE
         addView(overlayImg, full())
+        fcImg.scaleType = ImageView.ScaleType.FIT_CENTER
+        fcImg.visibility = View.GONE
+        addView(fcImg, full())
         zebraImg.scaleType = ImageView.ScaleType.FIT_CENTER
         zebraImg.visibility = View.GONE
         addView(zebraImg, full())
@@ -1015,7 +1033,9 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         zebraBtn.setOnClickListener { onToggleZebra?.invoke() }
         peakBtn.kind = IconButton.Kind.PEAK
         peakBtn.setOnClickListener { onTogglePeak?.invoke() }
-        for (b in arrayOf(guideBtn, zebraBtn, peakBtn)) {
+        fcBtn.kind = IconButton.Kind.FC
+        fcBtn.setOnClickListener { onToggleFc?.invoke() }
+        for (b in arrayOf(guideBtn, zebraBtn, peakBtn, fcBtn)) {
             val lp = LinearLayout.LayoutParams(dp(44), dp(44))
             lp.leftMargin = dp(8)
             side.addView(b, lp)
@@ -1024,6 +1044,41 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         sdLp.gravity = Gravity.BOTTOM or Gravity.END
         sdLp.setMargins(dp(12), 0, dp(12), dp(78))
         addView(side, sdLp)
+
+        // Scala dei falsi colori: compare a sinistra quando i falsi colori sono accesi
+        fcLegend.orientation = LinearLayout.VERTICAL
+        fcLegend.background = roundBg(0xB30B0F15.toInt(), 10, ctx)
+        fcLegend.setPadding(dp(6), dp(4), dp(8), dp(4))
+        val fcRows = arrayOf(
+            Triple(0xFFE5322D.toInt(), "98+", "bruciato"),
+            Triple(0xFFF2D230.toInt(), "90-97", "al limite"),
+            Triple(0xFFF08CB4.toInt(), "60-72", "pelle chiara"),
+            Triple(0xFF2FBF5A.toInt(), "42-48", "grigio medio"),
+            Triple(0xFF2F6BD6.toInt(), "3-10", "ombre"),
+            Triple(0xFF7A3FB5.toInt(), "0-3", "nero perso"),
+            Triple(0xFF6B6B6B.toInt(), "resto", "grigio")
+        )
+        for ((fc, range, name) in fcRows) {
+            val row = LinearLayout(ctx)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            val sw = View(ctx)
+            sw.background = roundBg(fc, 3, ctx)
+            row.addView(sw, LinearLayout.LayoutParams(dp(12), dp(12)))
+            val tv = TextView(ctx)
+            tv.text = "$range  $name"
+            tv.textSize = 10f
+            tv.isSingleLine = true
+            tv.setTextColor(Color.WHITE)
+            tv.setPadding(dp(6), dp(1), 0, dp(1))
+            row.addView(tv)
+            fcLegend.addView(row)
+        }
+        fcLegend.visibility = View.GONE
+        val lgLp = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lgLp.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        lgLp.leftMargin = dp(8)
+        addView(fcLegend, lgLp)
 
         // Pannello della sovrapposizione: cursore opacita' (50% di partenza) e scelta dell'immagine
         ovlPanel.orientation = LinearLayout.VERTICAL
@@ -1121,7 +1176,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         ovlPanel.visibility = View.GONE
         updateChips()
         if (on) {
-            for (v in arrayOf<View>(side, lag, zebraImg, peakImg, gridV, histV, castV, meterBox, overlayImg)) v.visibility = View.GONE
+            for (v in arrayOf<View>(side, lag, zebraImg, fcImg, fcLegend, peakImg, gridV, histV, castV, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (hasFrame && !lost) {
             side.visibility = View.VISIBLE
             lag.visibility = View.VISIBLE
@@ -1139,7 +1194,7 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
             img.alpha = 0.3f
             batt.alpha = 0.5f
             closePicker()
-            for (v in arrayOf<View>(zebraImg, peakImg, histV, castV, lag, side, bar, guideBar, ovlPanel, meterBox, overlayImg)) v.visibility = View.GONE
+            for (v in arrayOf<View>(zebraImg, fcImg, fcLegend, peakImg, histV, castV, lag, side, bar, guideBar, ovlPanel, meterBox, overlayImg)) v.visibility = View.GONE
         } else if (lost) {
             lost = false
             lostBox.visibility = View.GONE
@@ -1238,6 +1293,12 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         guideBtn.active = Monitor.guidesShow
         zebraBtn.active = Monitor.zebra
         peakBtn.active = Monitor.peaking
+        fcBtn.active = Monitor.falseColor
+
+        val fcb = a?.falseColor
+        fcImg.setImageBitmap(fcb)
+        fcImg.visibility = if (fcb != null && !shoot) View.VISIBLE else View.GONE
+        fcLegend.visibility = fcImg.visibility
 
         val z = a?.zebra
         zebraImg.setImageBitmap(z)
@@ -1605,6 +1666,8 @@ class Tile(ctx: Context, private val label: String, private val accent: Int) : F
         removeCallbacks(shotRevert)
         shotRevert.run()
         zebraImg.visibility = View.GONE
+        fcImg.visibility = View.GONE
+        fcLegend.visibility = View.GONE
         peakImg.visibility = View.GONE
         gridV.visibility = View.GONE
         guideV.visibility = View.GONE
@@ -3067,7 +3130,8 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Nessuna guida scelta: accendile in Impostazioni", Toast.LENGTH_SHORT).show()
             }
         }
-        t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; Monitor.save(prefs); refreshToolButtons() }
+        t.onToggleZebra = { Monitor.zebra = !Monitor.zebra; if (Monitor.zebra) Monitor.falseColor = false; Monitor.save(prefs); refreshToolButtons() }
+        t.onToggleFc = { Monitor.falseColor = !Monitor.falseColor; if (Monitor.falseColor) Monitor.zebra = false; Monitor.save(prefs); refreshToolButtons() }
         t.onTogglePeak = { Monitor.peaking = !Monitor.peaking; Monitor.save(prefs); refreshToolButtons() }
         t.onPick = { p, v -> applyProp(i, p, v) }
         Springs.pressable(t, 0.985f)
@@ -3335,13 +3399,14 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putBoolean("auto", it).apply()
         })
 
-        col = newPage("Monitor", "Zebra, focus peaking, griglia, istogramma, esposimetro")
+        col = newPage("Monitor", "Zebra, falsi colori, focus peaking, griglia, istogramma, esposimetro")
         val guideCol = newPage("Guide", "Guide di inquadratura, posizione, blocco, zona sicura")
-        col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; Monitor.save(prefs) })
+        col.addView(toggleRow("Zebra", Monitor.zebra) { Monitor.zebra = it; if (it) Monitor.falseColor = false; Monitor.save(prefs) })
         val zl = listOf(70, 80, 90, 95, 100)
         col.addView(chooserRow("Livello zebra (%)", zl.map { it.toString() }, zl.indexOf(Monitor.zebraLevel).coerceAtLeast(0)) {
             Monitor.zebraLevel = zl[it]; Monitor.save(prefs)
         })
+        col.addView(toggleRow("Falsi colori (scala sul riquadro)", Monitor.falseColor) { Monitor.falseColor = it; if (it) Monitor.zebra = false; Monitor.save(prefs) })
         col.addView(toggleRow("Focus peaking", Monitor.peaking) { Monitor.peaking = it; Monitor.save(prefs) })
         val pc = listOf(0xFFFF1744.toInt(), 0xFFFFEB3B.toInt(), 0xFFFFFFFF.toInt(), 0xFF69F0AE.toInt())
         col.addView(chooserRow("Colore peaking", listOf("Rosso", "Giallo", "Bianco", "Verde"), pc.indexOf(Monitor.peakColor).coerceAtLeast(0)) {

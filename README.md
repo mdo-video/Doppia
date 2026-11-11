@@ -1,4 +1,4 @@
-# Doppia 1.18 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
+# Doppia 1.19 (misuratore Kelvin, live view, REC, esposizione, WB, monitor, segni e take per Premiere, Sony PTP 3)
 
 Due camere Sony (FX30 e A6700) una accanto all'altra sul Xiaomi Pad 5, via Wi-Fi.
 
@@ -50,6 +50,9 @@ Android Studio (JDK 17) oppure GitHub: `.github/workflows/build.yml` produce l'A
 - **Aggiornamenti OTA**: l'app cerca l'ultima versione su GitHub (Releases) e la installa sopra quella vecchia. Tasto giallo **⬆ Aggiorna** in alto quando ce n'e' una nuova; ricerca manuale e interruttore in Impostazioni > Aggiornamenti.
 - Ogni compilazione su GitHub pubblica una Release con l'APK (`Doppia.apk`) e queste note.
 - L'aggiornamento non parte se una camera sta registrando.
+
+## Novita' 1.19
+- **Falsi colori**: nuovo pulsante a strisce nella colonna dei pulsanti di ogni riquadro (e interruttore in Impostazioni > Monitor). Al posto dell'immagine si vedono le fasce di esposizione, con la **scala dei riferimenti a sinistra**: **viola** 0-3% nero perso, **blu** 3-10% ombre, **verde** 42-48% grigio medio (cartoncino 18%), **rosa** 60-72% pelle chiara, **giallo** 90-97% al limite, **rosso** oltre 97,5% bruciato; il resto resta in grigio. Per esporre: cartoncino grigio sul verde, volto chiaro sul rosa, niente rosso sulle luci importanti. Calcolati sul live view, quindi affidabili con un profilo normale (non S-Log). Quando sono accesi la zebra si spegne; il peaking resta. Come zebra e peaking, vale per tutti i riquadri.
 
 ## Novita' 1.18
 - **Valori da scorrere col dito**: Kelvin, otturatore, diaframma, ISO, WB, EV e gli altri valori della barra non si premono piu': si fa scorrere la fila e vale il valore **al centro** (evidenziato su una fascia gialla). Si ferma da sola sul valore piu' vicino e lo manda alla camera; i Kelvin vengono mandati anche mentre scorri, quelli come otturatore e ISO quando ti fermi.

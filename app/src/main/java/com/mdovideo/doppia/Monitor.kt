@@ -7,7 +7,9 @@ import android.graphics.Bitmap
 class Analysis(
     val hist: IntArray?, val ev: Float, val zebra: Bitmap?, val peaking: Bitmap?,
     /** Media di rosso, verde e blu del fotogramma (0-255), per dominante colore e confronto A/B. */
-    val mr: Float = 0f, val mg: Float = 0f, val mb: Float = 0f, val hasColor: Boolean = false
+    val mr: Float = 0f, val mg: Float = 0f, val mb: Float = 0f, val hasColor: Boolean = false,
+    /** Immagine a falsi colori (opaca, sostituisce il live view), se accesi. */
+    val falseColor: Bitmap? = null
 ) {
     /** Tinta verde/magenta in punti percentuali: positivo = verde, negativo = magenta. */
     val tint: Float get() = if (!hasColor) 0f else 100f * (mg - (mr + mb) / 2f) / maxOf(1f, (mr + mg + mb) / 3f)
@@ -76,6 +78,7 @@ object Guides {
 object Monitor {
     @Volatile var zebra = false
     @Volatile var zebraLevel = 95        // percento (IRE)
+    @Volatile var falseColor = false     // falsi colori: fasce di esposizione al posto dell'immagine
     @Volatile var peaking = false
     @Volatile var peakColor = 0xFFFF1744.toInt()
     @Volatile var grid = false
@@ -94,6 +97,7 @@ object Monitor {
     fun load(p: SharedPreferences) {
         zebra = p.getBoolean("mon_zebra", false)
         zebraLevel = p.getInt("mon_zlevel", 95)
+        falseColor = p.getBoolean("mon_fc", false)
         peaking = p.getBoolean("mon_peak", false)
         peakColor = p.getInt("mon_peakcolor", 0xFFFF1744.toInt())
         grid = p.getBoolean("mon_grid", false)
@@ -110,12 +114,30 @@ object Monitor {
     fun save(p: SharedPreferences) {
         p.edit()
             .putBoolean("mon_zebra", zebra).putInt("mon_zlevel", zebraLevel)
-            .putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
+            .putBoolean("mon_fc", falseColor).putBoolean("mon_peak", peaking).putInt("mon_peakcolor", peakColor)
             .putBoolean("mon_grid", grid).putBoolean("mon_hist", histogram).putBoolean("mon_meter", meter).putBoolean("mon_cast", cast)
             .putInt("mon_guides", guides).putBoolean("mon_safe", safe)
             .putBoolean("mon_glock", guideLock).putBoolean("mon_gshow", guidesShow)
             .also { Guides.save(it) }
             .apply()
+    }
+
+    /**
+     * Fasce dei falsi colori (luminanza del live view in percento, scala video normale):
+     * viola 0-3 nero perso, blu 3-10 ombre, verde 42-48 grigio medio (18%), rosa 60-72 pelle chiara,
+     * giallo 90-97,5 al limite, rosso oltre 97,5 bruciato. Il resto resta in grigio.
+     */
+    private val FC_LUT = IntArray(256) { i ->
+        val p = i * 100.0 / 255.0
+        when {
+            p <= 3.0 -> 0xFF7A3FB5.toInt()
+            p <= 10.0 -> 0xFF2F6BD6.toInt()
+            p in 42.0..48.0 -> 0xFF2FBF5A.toInt()
+            p in 60.0..72.0 -> 0xFFF08CB4.toInt()
+            p in 90.0..97.49 -> 0xFFF2D230.toInt()
+            p >= 97.5 -> 0xFFE5322D.toInt()
+            else -> (0xFF000000.toInt() or (i shl 16) or (i shl 8) or i)
+        }
     }
 
     private val lin = FloatArray(256) { Math.pow(it / 255.0, 2.2).toFloat() }
@@ -148,12 +170,13 @@ object Monitor {
     private const val PEAK_THR = 40
 
     private fun analyzeInner(src: Bitmap): Analysis? {
-        val z = zebra
+        val fcOn = falseColor
+        val z = zebra && !fcOn
         val pk = peaking
         val wantHist = histogram
         val wantMeter = meter
         val wantCast = cast
-        if (!z && !pk && !wantHist && !wantMeter && !wantCast) return null
+        if (!z && !pk && !fcOn && !wantHist && !wantMeter && !wantCast) return null
 
         // Il peaking vuole piu' dettaglio degli altri strumenti
         val w = if (pk) 640 else 384
@@ -256,6 +279,12 @@ object Monitor {
             }
             pb = Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
         }
-        return Analysis(if (wantHist) hist else null, ev, zb, pb, cr, cg, cb, wantCast)
+        var fb: Bitmap? = null
+        if (fcOn) {
+            val out = sc.out
+            for (i in 0 until total) out[i] = FC_LUT[y[i]]
+            fb = Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+        }
+        return Analysis(if (wantHist) hist else null, ev, zb, pb, cr, cg, cb, wantCast, fb)
     }
 }
